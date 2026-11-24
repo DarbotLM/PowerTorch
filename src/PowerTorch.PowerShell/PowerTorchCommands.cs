@@ -167,6 +167,154 @@ public sealed class GetPowerTorchCheckpointCommand : PSCmdlet
     }
 }
 
+[Cmdlet(
+    VerbsCommon.New,
+    "PowerTorchTensor",
+    DefaultParameterSetName = Float32Set)]
+[OutputType(typeof(Tensor))]
+public sealed class NewPowerTorchTensorCommand : PSCmdlet
+{
+    private const string Float32Set = "Float32";
+    private const string Float64Set = "Float64";
+    private const string Int32Set = "Int32";
+    private const string Int64Set = "Int64";
+
+    [Parameter(Mandatory = true, ParameterSetName = Float32Set)]
+    public float[] Float32 { get; set; } = [];
+
+    [Parameter(Mandatory = true, ParameterSetName = Float64Set)]
+    public double[] Float64 { get; set; } = [];
+
+    [Parameter(Mandatory = true, ParameterSetName = Int32Set)]
+    public int[] Int32 { get; set; } = [];
+
+    [Parameter(Mandatory = true, ParameterSetName = Int64Set)]
+    public long[] Int64 { get; set; } = [];
+
+    [Parameter]
+    [ValidateNotNull]
+    public long[] Shape { get; set; } = [];
+
+    protected override void ProcessRecord()
+    {
+        long[]? shape = Shape.Length == 0 ? null : Shape;
+        Tensor tensor = ParameterSetName switch
+        {
+            Float32Set => TensorFactory.FromArray(Float32, shape),
+            Float64Set => TensorFactory.FromArray(Float64, shape),
+            Int32Set => TensorFactory.FromArray(Int32, shape),
+            Int64Set => TensorFactory.FromArray(Int64, shape),
+            _ => throw new InvalidOperationException($"Unknown parameter set '{ParameterSetName}'."),
+        };
+        WriteObject(tensor);
+    }
+}
+
+[Cmdlet(VerbsCommon.Get, "PowerTorchTensor")]
+[OutputType(typeof(PowerTorchTensorInfo))]
+public sealed class GetPowerTorchTensorCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, ValueFromPipeline = true)]
+    [ValidateNotNull]
+    public Tensor Tensor { get; set; } = null!;
+
+    protected override void ProcessRecord()
+    {
+        WriteObject(new PowerTorchTensorInfo(
+            Tensor.DataType.ToString(),
+            Tensor.Device.ToString(),
+            Tensor.Shape.ToArray(),
+            Tensor.Strides.ToArray(),
+            Tensor.ElementCount,
+            Tensor.IsContiguous));
+    }
+}
+
+[Cmdlet(VerbsCommunications.Read, "PowerTorchCheckpointTensor")]
+[OutputType(typeof(Tensor))]
+public sealed class ReadPowerTorchCheckpointTensorCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    [ValidateNotNullOrEmpty]
+    public string Path { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? TensorName { get; set; }
+
+    [Parameter]
+    [ValidateRange(1, 2_147_483_647)]
+    public long MaximumBytes { get; set; } = 1_000_000;
+
+    protected override void ProcessRecord()
+    {
+        string resolvedPath = GetUnresolvedProviderPathFromPSPath(Path);
+        using var checkpoint = new SafetensorsFile(resolvedPath);
+        SafeTensorDescriptor descriptor;
+        if (TensorName is not null)
+        {
+            descriptor = checkpoint.GetTensor(TensorName);
+        }
+        else
+        {
+            descriptor = checkpoint.Tensors.Values
+                .Where(candidate =>
+                    candidate.DataType == DataType.Float32 &&
+                    candidate.ByteLength <= MaximumBytes)
+                .OrderBy(candidate => candidate.ByteLength)
+                .FirstOrDefault()
+                ?? throw new PowerTorchException(
+                    PowerTorchErrorCategory.Serialization,
+                    $"No float32 tensor of at most {MaximumBytes} bytes exists in '{resolvedPath}'.");
+        }
+
+        byte[] bytes = checkpoint.ReadTensorBytesAsync(descriptor.Name).AsTask().GetAwaiter().GetResult();
+        WriteObject(TensorFactory.FromRawBytes(descriptor.DataType, descriptor.Shape, bytes));
+    }
+}
+
+[Cmdlet(VerbsLifecycle.Invoke, "PowerTorchOperation")]
+[OutputType(typeof(Tensor))]
+public sealed class InvokePowerTorchOperationCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    [ValidateSet("Add", "Multiply", "Subtract", "Divide", "Sigmoid", "Sum", "Mean")]
+    public string Operation { get; set; } = string.Empty;
+
+    [Parameter(Mandatory = true)]
+    [ValidateNotNull]
+    public Tensor Left { get; set; } = null!;
+
+    [Parameter]
+    public Tensor? Right { get; set; }
+
+    protected override void ProcessRecord()
+    {
+        var runtime = new PowerTorchRuntime();
+        runtime.Register(new CpuBackend());
+        Tensor result = Operation switch
+        {
+            "Add" => runtime.Add(Left, RequireRight()),
+            "Multiply" => runtime.Multiply(Left, RequireRight()),
+            "Subtract" => runtime.Subtract(Left, RequireRight()),
+            "Divide" => runtime.Divide(Left, RequireRight()),
+            "Sigmoid" => runtime.Sigmoid(Left),
+            "Sum" => runtime.Sum(Left),
+            "Mean" => runtime.Mean(Left),
+            _ => throw new InvalidOperationException($"Unknown operation '{Operation}'."),
+        };
+        WriteObject(result);
+    }
+
+    private Tensor RequireRight()
+    {
+        if (Right is null)
+        {
+            throw new ArgumentException($"Operation '{Operation}' requires -Right.");
+        }
+        return Right;
+    }
+}
+
 public sealed record PowerTorchInfo(
     string Name,
     string Version,
@@ -189,3 +337,11 @@ public sealed record SafeTensorMetadata(
     int TensorCount,
     IReadOnlyList<string> DTypes,
     string? MetadataJson);
+
+public sealed record PowerTorchTensorInfo(
+    string DataType,
+    string Device,
+    IReadOnlyList<long> Shape,
+    IReadOnlyList<long> Strides,
+    long ElementCount,
+    bool IsContiguous);

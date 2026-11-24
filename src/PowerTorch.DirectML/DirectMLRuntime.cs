@@ -84,6 +84,16 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
 
     public Tensor Multiply(Tensor left, Tensor right) => throw Unsupported("tensor.multiply");
 
+    public Tensor Subtract(Tensor left, Tensor right) => throw Unsupported("tensor.subtract");
+
+    public Tensor Divide(Tensor left, Tensor right) => throw Unsupported("tensor.divide");
+
+    public Tensor Sigmoid(Tensor input) => throw Unsupported("tensor.sigmoid");
+
+    public Tensor Sum(Tensor input) => throw Unsupported("tensor.sum");
+
+    public Tensor Mean(Tensor input) => throw Unsupported("tensor.mean");
+
     public void Dispose()
     {
         if (_disposed)

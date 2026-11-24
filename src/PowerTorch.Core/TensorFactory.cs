@@ -20,6 +20,14 @@ public static class TensorFactory
         return FromArray(values, descriptor);
     }
 
+    public static Tensor FromArray(double[] values, IEnumerable<long>? shape = null)
+    {
+        var resolvedShape = shape?.ToArray() ?? [values.LongLength];
+        var descriptor = TensorDescriptors.Contiguous(DataType.Float64, resolvedShape);
+        ValidateCount(descriptor, values.LongLength);
+        return FromArray(values, descriptor);
+    }
+
     public static Tensor FromArray(long[] values, IEnumerable<long>? shape = null)
     {
         var resolvedShape = shape?.ToArray() ?? [values.LongLength];

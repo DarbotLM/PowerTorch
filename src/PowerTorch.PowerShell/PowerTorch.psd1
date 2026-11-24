@@ -13,6 +13,10 @@
         'Get-PowerTorchDevice'
         'Test-PowerTorch'
         'Get-PowerTorchCheckpoint'
+        'New-PowerTorchTensor'
+        'Get-PowerTorchTensor'
+        'Invoke-PowerTorchOperation'
+        'Read-PowerTorchCheckpointTensor'
     )
     FunctionsToExport = @()
     AliasesToExport = @()

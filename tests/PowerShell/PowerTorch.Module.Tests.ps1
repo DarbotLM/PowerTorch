@@ -27,4 +27,16 @@ Describe 'PowerTorch binary module' {
         $checkpoint.TensorCount | Should -BeGreaterThan 600
         $checkpoint.DataBytes | Should -BeGreaterThan 880MB
     }
+
+    It 'executes CPU operations on a real checkpoint tensor' {
+        $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
+            'OmniParser\weights\florence31_icon_caption\model.safetensors'
+        $tensor = Read-PowerTorchCheckpointTensor -Path $checkpointPath -MaximumBytes 100000
+        $result = Invoke-PowerTorchOperation -Operation Add -Left $tensor -Right $tensor
+        $info = Get-PowerTorchTensor -Tensor $result
+        $info.DataType | Should -Be 'Float32'
+        $info.ElementCount | Should -BeGreaterThan 0
+        $tensor.Dispose()
+        $result.Dispose()
+    }
 }

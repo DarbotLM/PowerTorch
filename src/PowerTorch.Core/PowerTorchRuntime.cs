@@ -30,6 +30,16 @@ public sealed class PowerTorchRuntime
 
     public Tensor Multiply(Tensor left, Tensor right) => Resolve(left, right).Multiply(left, right);
 
+    public Tensor Subtract(Tensor left, Tensor right) => Resolve(left, right).Subtract(left, right);
+
+    public Tensor Divide(Tensor left, Tensor right) => Resolve(left, right).Divide(left, right);
+
+    public Tensor Sigmoid(Tensor input) => Resolve(input).Sigmoid(input);
+
+    public Tensor Sum(Tensor input) => Resolve(input).Sum(input);
+
+    public Tensor Mean(Tensor input) => Resolve(input).Mean(input);
+
     private ITensorBackend Resolve(Tensor left, Tensor right)
     {
         if (left.Device != right.Device)
@@ -52,4 +62,6 @@ public sealed class PowerTorchRuntime
         }
         return GetBackend(left.Device.Kind);
     }
+
+    private ITensorBackend Resolve(Tensor input) => GetBackend(input.Device.Kind);
 }
