@@ -13,3 +13,5 @@ cache/
 graphs/
 checkpoints/
 *.log
+site/compatibility.json
+site/status.json

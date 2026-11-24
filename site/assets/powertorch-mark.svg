@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">PowerTorch</title>
+  <defs>
+    <linearGradient id="g" x1="30" y1="22" x2="226" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5ae4ff"/>
+      <stop offset="0.48" stop-color="#4f8dff"/>
+      <stop offset="1" stop-color="#8b74ff"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="60" fill="#071019"/>
+  <path d="M65 54h75c34 0 57 18 57 49 0 23-13 39-35 47l34 52h-50l-29-47H99v47H65V54Zm34 36v32h36c17 0 27-6 27-17 0-10-10-15-27-15H99Z" fill="url(#g)" filter="url(#glow)"/>
+  <path d="M188 38 214 65l-19 19-27-27 20-19Z" fill="#ffbd59"/>
+  <circle cx="196" cy="57" r="7" fill="#fff7dd"/>
+</svg>

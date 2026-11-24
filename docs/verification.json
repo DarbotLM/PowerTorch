@@ -1,0 +1,13 @@
+{
+  "schema": "powertorch/verification/v1",
+  "xunitTests": 7,
+  "pesterTests": 7,
+  "buildWarnings": 0,
+  "buildErrors": 0,
+  "directMLAdapter": "NVIDIA T1000 8GB",
+  "directMLAdd": "real Florence float32 tensor parity",
+  "safetensorsTensors": 665,
+  "safetensorsDataBytes": 926065664,
+  "pythonRuntimeRequired": false,
+  "notes": "Model-dependent verification uses real approved local assets and is not expected to run in public CI."
+}
