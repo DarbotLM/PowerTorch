@@ -12,6 +12,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>PowerTorch.PowerShell</AssemblyName>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,5 +21,13 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AI.DirectML" Version="1.15.4" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <Target Name="CopyDirectMLRuntime" AfterTargets="Build" Condition="'$(PkgMicrosoft_AI_DirectML)' != '' and Exists('$(PkgMicrosoft_AI_DirectML)bin\x64-win\DirectML.dll')">
+    <Copy SourceFiles="$(PkgMicrosoft_AI_DirectML)bin\x64-win\DirectML.dll" DestinationFolder="$(OutDir)" />
+  </Target>
 
 </Project>

@@ -36,6 +36,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet build failed with exit code $LASTEXITCODE."
 }
 
+if (Test-Path -LiteralPath $OutputPath) {
+    Remove-Item -LiteralPath $OutputPath -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
 $moduleSource = Join-Path $projectRoot "src\PowerTorch.PowerShell\bin\$Configuration\net10.0"
 Get-ChildItem -LiteralPath $moduleSource -Force |
@@ -49,6 +52,13 @@ if (-not $ManagedOnly) {
     } else {
         throw "Native DirectML DLL was not produced: $nativeDll"
     }
+}
+
+& dotnet publish (Join-Path $projectRoot 'src\PowerTorch.Cli\PowerTorch.Cli.csproj') `
+    --configuration $Configuration --runtime win-x64 --self-contained false `
+    --output (Join-Path $OutputPath 'bin')
+if ($LASTEXITCODE -ne 0) {
+    throw "PowerTorch.Cli publish failed with exit code $LASTEXITCODE."
 }
 
 Get-ChildItem -LiteralPath $OutputPath -Recurse |

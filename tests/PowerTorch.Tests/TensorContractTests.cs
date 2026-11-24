@@ -86,4 +86,28 @@ internal static class RealAsset
         throw new FileNotFoundException(
             "The approved Florence safetensors corpus was not found beneath the toolbox tree.");
     }
+
+    public static string OcrDetectorOnnx()
+    {
+        string? directory = AppContext.BaseDirectory;
+        while (directory is not null)
+        {
+            string candidate = Path.Combine(
+                directory,
+                "darbot-env",
+                "Lib",
+                "site-packages",
+                "rapidocr",
+                "models",
+                "PP-OCRv6_det_small.onnx");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+            directory = Directory.GetParent(directory)?.FullName;
+        }
+
+        throw new FileNotFoundException(
+            "The approved RapidOCR ONNX detector was not found in the Darbot environment.");
+    }
 }

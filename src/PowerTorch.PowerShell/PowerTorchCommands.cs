@@ -1,5 +1,7 @@
 using System.Management.Automation;
+using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 using PowerTorch.Core;
 using PowerTorch.Cpu;
 using PowerTorch.DirectML;
@@ -269,6 +271,99 @@ public sealed class ReadPowerTorchCheckpointTensorCommand : PSCmdlet
 
         byte[] bytes = checkpoint.ReadTensorBytesAsync(descriptor.Name).AsTask().GetAwaiter().GetResult();
         WriteObject(TensorFactory.FromRawBytes(descriptor.DataType, descriptor.Shape, bytes));
+    }
+}
+
+[Cmdlet(VerbsCommon.Get, "PowerTorchOnnx")]
+[OutputType(typeof(OnnxModelInfo))]
+public sealed class GetPowerTorchOnnxCommand : PSCmdlet
+{
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web);
+
+    [Parameter(Mandatory = true, Position = 0)]
+    [ValidateNotNullOrEmpty]
+    public string Path { get; set; } = string.Empty;
+
+    [Parameter]
+    public int AdapterIndex { get; set; }
+
+    [Parameter]
+    public SwitchParameter Cpu { get; set; }
+
+    protected override void ProcessRecord()
+    {
+        string resolvedPath = GetUnresolvedProviderPathFromPSPath(Path);
+        string? cliPath = ResolvePowerTorchCli();
+        if (cliPath is null)
+        {
+            ThrowTerminatingError(new ErrorRecord(
+                new FileNotFoundException("PowerTorch.Cli.exe was not found in the module package."),
+                "PowerTorch.CliMissing",
+                ErrorCategory.NotInstalled,
+                resolvedPath));
+            return;
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = cliPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            startInfo.ArgumentList.Add("onnx-inspect");
+            startInfo.ArgumentList.Add(resolvedPath);
+            if (Cpu.IsPresent)
+            {
+                startInfo.ArgumentList.Add("--cpu");
+            }
+            else
+            {
+                startInfo.ArgumentList.Add("--adapter");
+                startInfo.ArgumentList.Add(
+                    AdapterIndex.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            using var process = Process.Start(startInfo) ??
+                throw new InvalidOperationException("PowerTorch.Cli process did not start.");
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"PowerTorch.Cli exited {process.ExitCode}: {stderr.Trim()}");
+            }
+            var metadata = JsonSerializer.Deserialize<OnnxModelInfo>(
+                stdout,
+                JsonOptions) ??
+                throw new InvalidDataException("PowerTorch.Cli returned no ONNX metadata.");
+            WriteObject(metadata);
+        }
+        catch (Exception exception)
+        {
+            ThrowTerminatingError(new ErrorRecord(
+                exception,
+                "PowerTorch.OnnxInvalid",
+                ErrorCategory.InvalidData,
+                resolvedPath));
+        }
+    }
+
+    private static string? ResolvePowerTorchCli()
+    {
+        string moduleDirectory = System.IO.Path.GetDirectoryName(
+            Assembly.GetExecutingAssembly().Location) ?? string.Empty;
+        string packaged = System.IO.Path.Combine(moduleDirectory, "bin", "PowerTorch.Cli.exe");
+        if (File.Exists(packaged))
+        {
+            return packaged;
+        }
+        string? configured = Environment.GetEnvironmentVariable("POWERTORCH_CLI");
+        return configured is not null && File.Exists(configured) ? configured : null;
     }
 }
 

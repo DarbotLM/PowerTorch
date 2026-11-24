@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/PowerTorch.Abstractions/PowerTorch.Abstractions.csproj" />
     <Project Path="src/PowerTorch.Autograd/PowerTorch.Autograd.csproj" />
+    <Project Path="src/PowerTorch.Cli/PowerTorch.Cli.csproj" />
     <Project Path="src/PowerTorch.Compiler/PowerTorch.Compiler.csproj" />
     <Project Path="src/PowerTorch.Core/PowerTorch.Core.csproj" />
     <Project Path="src/PowerTorch.Cpu/PowerTorch.Cpu.csproj" />

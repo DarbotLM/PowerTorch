@@ -17,6 +17,7 @@
         'Get-PowerTorchTensor'
         'Invoke-PowerTorchOperation'
         'Read-PowerTorchCheckpointTensor'
+        'Get-PowerTorchOnnx'
     )
     FunctionsToExport = @()
     AliasesToExport = @()

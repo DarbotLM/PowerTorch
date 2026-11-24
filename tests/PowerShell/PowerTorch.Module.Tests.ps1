@@ -39,4 +39,14 @@ Describe 'PowerTorch binary module' {
         $tensor.Dispose()
         $result.Dispose()
     }
+
+    It 'opens a real OCR ONNX model on DirectML' {
+        $onnxPath = Join-Path (Split-Path -Parent (Split-Path -Parent $projectRoot)) `
+            'darbot-env\Lib\site-packages\rapidocr\models\PP-OCRv6_det_small.onnx'
+        $model = Get-PowerTorchOnnx -Path $onnxPath
+        $model.DirectMLRequested | Should -BeTrue
+        $model.RequestedProvider | Should -Be 'DmlExecutionProvider'
+        $model.Inputs.Count | Should -BeGreaterThan 0
+        $model.Outputs.Count | Should -BeGreaterThan 0
+    }
 }
