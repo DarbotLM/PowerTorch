@@ -4,7 +4,9 @@ using System.Reflection;
 using System.Text.Json;
 using PowerTorch.Core;
 using PowerTorch.Cpu;
+using PowerTorch.Autograd;
 using PowerTorch.DirectML;
+using PowerTorch.Optim;
 using PowerTorch.Serialization;
 
 namespace PowerTorch.PowerShell;
@@ -407,6 +409,127 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
             throw new ArgumentException($"Operation '{Operation}' requires -Right.");
         }
         return Right;
+    }
+}
+
+[Cmdlet(VerbsCommon.New, "PowerTorchVariable")]
+[OutputType(typeof(Variable))]
+public sealed class NewPowerTorchVariableCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+    [ValidateNotNull]
+    public Tensor Tensor { get; set; } = null!;
+
+    [Parameter]
+    public SwitchParameter RequiresGradient { get; set; }
+
+    protected override void ProcessRecord()
+    {
+        WriteObject(Variable.Leaf(Tensor, RequiresGradient.IsPresent));
+    }
+}
+
+[Cmdlet(VerbsLifecycle.Invoke, "PowerTorchVariableOperation")]
+[OutputType(typeof(Variable))]
+public sealed class InvokePowerTorchVariableOperationCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    [ValidateSet("Add", "Multiply", "Subtract", "Divide", "Sigmoid", "Sum", "Mean")]
+    public string Operation { get; set; } = string.Empty;
+
+    [Parameter(Mandatory = true)]
+    [ValidateNotNull]
+    public Variable Left { get; set; } = null!;
+
+    [Parameter]
+    public Variable? Right { get; set; }
+
+    protected override void ProcessRecord()
+    {
+        WriteObject(Operation switch
+        {
+            "Add" => Left.Add(RequireRight()),
+            "Multiply" => Left.Multiply(RequireRight()),
+            "Subtract" => Left.Subtract(RequireRight()),
+            "Divide" => Left.Divide(RequireRight()),
+            "Sigmoid" => Left.Sigmoid(),
+            "Sum" => Left.Sum(),
+            "Mean" => Left.Mean(),
+            _ => throw new InvalidOperationException($"Unknown operation '{Operation}'."),
+        });
+    }
+
+    private Variable RequireRight()
+    {
+        if (Right is null)
+        {
+            throw new ArgumentException($"Operation '{Operation}' requires -Right.");
+        }
+        return Right;
+    }
+}
+
+[Cmdlet(VerbsLifecycle.Invoke, "PowerTorchBackward")]
+public sealed class InvokePowerTorchBackwardCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+    [ValidateNotNull]
+    public Variable Variable { get; set; } = null!;
+
+    protected override void ProcessRecord()
+    {
+        Variable.Backward();
+        WriteObject(Variable);
+    }
+}
+
+[Cmdlet(VerbsCommon.New, "PowerTorchAdamW")]
+[OutputType(typeof(AdamW))]
+public sealed class NewPowerTorchAdamWCommand : PSCmdlet
+{
+    [Parameter]
+    [ValidateRange(0.000000001, 1.0)]
+    public double LearningRate { get; set; } = 1e-4;
+
+    [Parameter]
+    [ValidateRange(0.0, 1.0)]
+    public double WeightDecay { get; set; } = 0.01;
+
+    protected override void ProcessRecord()
+    {
+        WriteObject(new AdamW(
+            learningRate: LearningRate,
+            weightDecay: WeightDecay));
+    }
+}
+
+[Cmdlet(VerbsLifecycle.Invoke, "PowerTorchOptimizerStep")]
+public sealed class InvokePowerTorchOptimizerStepCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    [ValidateNotNull]
+    public AdamW Optimizer { get; set; } = null!;
+
+    [Parameter(Mandatory = true, Position = 1, ValueFromPipeline = true)]
+    [ValidateNotNull]
+    public Variable[] Parameter { get; set; } = [];
+
+    protected override void ProcessRecord()
+    {
+        WriteObject(Optimizer.Step(Parameter));
+    }
+}
+
+[Cmdlet(VerbsCommon.Clear, "PowerTorchGradient")]
+public sealed class ClearPowerTorchGradientCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+    [ValidateNotNull]
+    public Variable[] Parameter { get; set; } = [];
+
+    protected override void ProcessRecord()
+    {
+        AdamW.ZeroGrad(Parameter);
     }
 }
 

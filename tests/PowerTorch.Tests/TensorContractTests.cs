@@ -1,6 +1,8 @@
 using PowerTorch.Core;
 using PowerTorch.Cpu;
 using PowerTorch.Serialization;
+using PowerTorch.Autograd;
+using PowerTorch.Optim;
 
 namespace PowerTorch.Tests;
 
@@ -59,6 +61,42 @@ public sealed class TensorContractTests
                 DataType.Float32,
                 [32, 16],
                 [16, -1]));
+    }
+
+    [Fact]
+    public async Task AutogradAndAdamWUpdateARealFlorenceTensor()
+    {
+        string path = RealAsset.FlorenceSafetensors();
+        using var checkpoint = new SafetensorsFile(path);
+        var source = checkpoint.Tensors.Values
+            .First(tensor => tensor.DataType == DataType.Float32 && tensor.ByteLength <= 100_000);
+        byte[] bytes = await checkpoint.ReadTensorBytesAsync(source.Name);
+        using var input = TensorFactory.FromRawBytes(source.DataType, source.Shape, bytes);
+        float[] before = input.AsSpan<float>().ToArray();
+        var parameter = Variable.Leaf(input, requiresGradient: true);
+        var sigmoid = parameter.Sigmoid();
+        var loss = sigmoid.Sum();
+
+        loss.Backward();
+
+        Assert.NotNull(parameter.Gradient);
+        Assert.Equal(parameter.Data.ElementCount, parameter.Gradient.ElementCount);
+        using var optimizer = new AdamW(learningRate: 1e-4, weightDecay: 0.0);
+        optimizer.Step([parameter]);
+
+        bool changed = false;
+        var after = parameter.Data.AsSpan<float>();
+        for (int index = 0; index < after.Length; index++)
+        {
+            changed |= Math.Abs(after[index] - before[index]) > 1e-7;
+        }
+        Assert.True(changed);
+        AdamW.ZeroGrad([parameter]);
+        Assert.Null(parameter.Gradient);
+
+        loss.Dispose();
+        sigmoid.Dispose();
+        parameter.Dispose();
     }
 }
 

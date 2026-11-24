@@ -54,8 +54,13 @@
       "capabilities": [
         {
           "name": "reverse mode",
-          "status": "planned",
+          "status": "partial",
           "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "AdamW float32/float64",
+          "status": "partial",
+          "backends": ["cpu"]
         }
       ]
     },
@@ -69,7 +74,7 @@
         },
         {
           "name": "ONNX import/export",
-          "status": "planned",
+          "status": "partial",
           "backends": ["cpu", "directml", "cuda"]
         },
         {

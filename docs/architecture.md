@@ -20,6 +20,11 @@ PowerTorch separates stable public contracts from execution backends.
    sharding and recovery.
 10. `PowerTorch.PowerShell`: binary cmdlets over the same managed APIs.
 
+ONNX Runtime DirectML is isolated in `PowerTorch.Cli` because loading its
+native compile API directly in the PowerShell process can terminate the host.
+PowerShell cmdlets invoke this native .NET process and exchange structured JSON;
+Python is not involved.
+
 ## Backend selection
 
 Backend choice is explicit. No operator silently changes device, dtype, or

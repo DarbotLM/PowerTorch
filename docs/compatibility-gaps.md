@@ -20,6 +20,20 @@ slices.
 - LoRA parameter injection and adapter disable
 - AdamW step and zero-grad
 - Native HF/TorchScript/safetensors state reconstruction
+- DirectML operator execution beyond ONNX Runtime interop
+- Autograd broadcasting, views, higher-order gradients, AMP, and checkpointed
+  graph execution
+
+## Implemented now
+
+- Native safetensors metadata and real float tensor reads
+- CPU float32/float64/int32/int64 add/multiply/subtract/divide and selected
+  reductions
+- Reverse-mode sigmoid/sum/mean and arithmetic gradients
+- AdamW float32/float64 state and one optimizer step
+- DirectML ONNX metadata loading in an isolated native process
+- PowerShell cmdlets for checkpoint tensors, variable graphs, backward, and
+  AdamW on the same tensor runtime
 
 ## Explicitly not present in current Darbot use
 

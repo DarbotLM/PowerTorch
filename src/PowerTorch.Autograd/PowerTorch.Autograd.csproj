@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PowerTorch.Core\PowerTorch.Core.csproj" />
+    <ProjectReference Include="..\PowerTorch.Cpu\PowerTorch.Cpu.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

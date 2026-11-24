@@ -5,6 +5,8 @@
     <ProjectReference Include="..\PowerTorch.Cpu\PowerTorch.Cpu.csproj" />
     <ProjectReference Include="..\PowerTorch.DirectML\PowerTorch.DirectML.csproj" />
     <ProjectReference Include="..\PowerTorch.Serialization\PowerTorch.Serialization.csproj" />
+    <ProjectReference Include="..\PowerTorch.Autograd\PowerTorch.Autograd.csproj" />
+    <ProjectReference Include="..\PowerTorch.Optim\PowerTorch.Optim.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

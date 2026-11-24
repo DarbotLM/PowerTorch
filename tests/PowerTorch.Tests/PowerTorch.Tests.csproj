@@ -24,12 +24,12 @@
     <ProjectReference Include="..\..\src\PowerTorch.Cpu\PowerTorch.Cpu.csproj" />
     <ProjectReference Include="..\..\src\PowerTorch.DirectML\PowerTorch.DirectML.csproj" />
     <ProjectReference Include="..\..\src\PowerTorch.Serialization\PowerTorch.Serialization.csproj" />
+    <ProjectReference Include="..\..\src\PowerTorch.Autograd\PowerTorch.Autograd.csproj" />
+    <ProjectReference Include="..\..\src\PowerTorch.Optim\PowerTorch.Optim.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\artifacts\native\$(Configuration)\PowerTorch.DirectML.Native.dll')">
-    <None Include="$(MSBuildThisFileDirectory)..\..\artifacts\native\$(Configuration)\PowerTorch.DirectML.Native.dll"
-          Link="PowerTorch.DirectML.Native.dll"
-          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\artifacts\native\$(Configuration)\PowerTorch.DirectML.Native.dll" Link="PowerTorch.DirectML.Native.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

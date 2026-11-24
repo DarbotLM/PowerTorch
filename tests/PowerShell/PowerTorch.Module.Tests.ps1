@@ -49,4 +49,24 @@ Describe 'PowerTorch binary module' {
         $model.Inputs.Count | Should -BeGreaterThan 0
         $model.Outputs.Count | Should -BeGreaterThan 0
     }
+
+    It 'performs backward and one AdamW step on a real tensor' {
+        $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
+            'OmniParser\weights\florence31_icon_caption\model.safetensors'
+        $tensor = Read-PowerTorchCheckpointTensor -Path $checkpointPath -MaximumBytes 100000
+        $parameter = New-PowerTorchVariable -Tensor $tensor -RequiresGradient
+        $sigmoid = Invoke-PowerTorchVariableOperation -Operation Sigmoid -Left $parameter
+        $loss = Invoke-PowerTorchVariableOperation -Operation Sum -Left $sigmoid
+        Invoke-PowerTorchBackward -Variable $loss | Out-Null
+        $parameter.Gradient | Should -Not -BeNullOrEmpty
+        $optimizer = New-PowerTorchAdamW -LearningRate 0.0001 -WeightDecay 0
+        Invoke-PowerTorchOptimizerStep -Optimizer $optimizer -Parameter $parameter |
+            Should -Be 1
+        Clear-PowerTorchGradient -Parameter $parameter
+        $parameter.Gradient | Should -BeNullOrEmpty
+        $optimizer.Dispose()
+        $loss.Dispose()
+        $sigmoid.Dispose()
+        $parameter.Dispose()
+    }
 }

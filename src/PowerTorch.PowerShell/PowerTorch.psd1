@@ -18,6 +18,12 @@
         'Invoke-PowerTorchOperation'
         'Read-PowerTorchCheckpointTensor'
         'Get-PowerTorchOnnx'
+        'New-PowerTorchVariable'
+        'Invoke-PowerTorchVariableOperation'
+        'Invoke-PowerTorchBackward'
+        'New-PowerTorchAdamW'
+        'Invoke-PowerTorchOptimizerStep'
+        'Clear-PowerTorchGradient'
     )
     FunctionsToExport = @()
     AliasesToExport = @()
