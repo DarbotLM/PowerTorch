@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+native/**/build/
+native/**/.cache/
+cache/
+graphs/
+checkpoints/
+*.log

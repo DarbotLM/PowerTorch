@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\PowerTorch.Core\PowerTorch.Core.csproj" />
+    <ProjectReference Include="..\PowerTorch.Cpu\PowerTorch.Cpu.csproj" />
+    <ProjectReference Include="..\PowerTorch.DirectML\PowerTorch.DirectML.csproj" />
+    <ProjectReference Include="..\PowerTorch.Serialization\PowerTorch.Serialization.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>PowerTorch.PowerShell</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Management.Automation">
+      <HintPath>C:\Program Files\PowerShell\7\System.Management.Automation.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,30 @@
+#Requires -Version 7.4
+
+BeforeAll {
+    $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $modulePath = Join-Path $projectRoot 'artifacts\module\PowerTorch.psd1'
+    Import-Module $modulePath -Force
+}
+
+Describe 'PowerTorch binary module' {
+    It 'loads a native module without requiring Python' {
+        $info = Get-PowerTorchInfo
+        $info.Name | Should -Be 'PowerTorch'
+        $info.PythonRuntimeRequired | Should -BeFalse
+    }
+
+    It 'reports CPU and DirectML health' {
+        $health = Test-PowerTorch -DirectML
+        $health.Healthy | Should -BeTrue
+        $health.Cpu.Backend | Should -Be 'PowerTorch.Cpu'
+        $health.DirectML.Driver | Should -Not -BeNullOrEmpty
+    }
+
+    It 'parses the real Florence safetensors checkpoint' {
+        $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
+            'OmniParser\weights\florence31_icon_caption\model.safetensors'
+        $checkpoint = Get-PowerTorchCheckpoint -Path $checkpointPath
+        $checkpoint.TensorCount | Should -BeGreaterThan 600
+        $checkpoint.DataBytes | Should -BeGreaterThan 880MB
+    }
+}
