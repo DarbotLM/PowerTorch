@@ -40,6 +40,18 @@ Describe 'PowerTorch binary module' {
         $result.Dispose()
     }
 
+    It 'executes native DirectML add on a real checkpoint tensor' {
+        $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
+            'OmniParser\weights\florence31_icon_caption\model.safetensors'
+        $tensor = Read-PowerTorchCheckpointTensor -Path $checkpointPath -MaximumBytes 100000
+        $result = Invoke-PowerTorchOperation `
+            -Operation Add -Left $tensor -Right $tensor -Backend DirectML
+        (Get-PowerTorchTensor -Tensor $result).ElementCount |
+            Should -Be $tensor.ElementCount
+        $tensor.Dispose()
+        $result.Dispose()
+    }
+
     It 'opens a real OCR ONNX model on DirectML' {
         $onnxPath = Join-Path (Split-Path -Parent (Split-Path -Parent $projectRoot)) `
             'darbot-env\Lib\site-packages\rapidocr\models\PP-OCRv6_det_small.onnx'

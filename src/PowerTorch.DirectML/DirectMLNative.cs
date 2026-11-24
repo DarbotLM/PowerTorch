@@ -48,4 +48,18 @@ internal static class DirectMLNative
         CallingConvention = CallingConvention.Cdecl,
         CharSet = CharSet.Ansi)]
     internal static extern int SelfTest(IntPtr device, byte[] error, uint errorBytes);
+
+    [DllImport(
+        Library,
+        EntryPoint = "pt_dml_add_f32",
+        CallingConvention = CallingConvention.Cdecl,
+        CharSet = CharSet.Ansi)]
+    internal static extern int AddF32(
+        IntPtr device,
+        float[] left,
+        float[] right,
+        float[] output,
+        ulong elementCount,
+        byte[] error,
+        uint errorBytes);
 }

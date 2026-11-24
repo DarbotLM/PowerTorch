@@ -39,13 +39,42 @@ internal sealed class DirectMLDeviceHandle : SafeHandleZeroOrMinusOneIsInvalid
         }
     }
 
+    public float[] AddF32(ReadOnlySpan<float> left, ReadOnlySpan<float> right)
+    {
+        if (left.Length != right.Length)
+        {
+            throw new ArgumentException("DirectML add inputs must have the same length.");
+        }
+        if (left.IsEmpty)
+        {
+            return [];
+        }
+        float[] leftArray = left.ToArray();
+        float[] rightArray = right.ToArray();
+        float[] output = new float[left.Length];
+        byte[] error = new byte[2048];
+        int status = DirectMLNative.AddF32(
+            handle,
+            leftArray,
+            rightArray,
+            output,
+            (ulong)output.Length,
+            error,
+            (uint)error.Length);
+        if (status != 0)
+        {
+            throw DirectMLException(status, error);
+        }
+        return output;
+    }
+
     protected override bool ReleaseHandle()
     {
         DirectMLNative.ReleaseDevice(handle);
         return true;
     }
 
-    private static PowerTorchException DirectMLException(int status, byte[] error)
+    internal static PowerTorchException DirectMLException(int status, byte[] error)
     {
         int terminator = Array.IndexOf(error, (byte)0);
         string message = Encoding.UTF8.GetString(

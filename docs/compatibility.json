@@ -38,6 +38,11 @@
           "backends": ["cpu"]
         },
         {
+          "name": "DirectML float32 host-buffer add",
+          "status": "supported",
+          "backends": ["directml"]
+        },
+        {
           "name": "broadcasting",
           "status": "planned",
           "backends": ["cpu", "directml", "cuda"]

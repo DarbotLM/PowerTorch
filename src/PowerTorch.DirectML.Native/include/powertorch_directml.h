@@ -46,3 +46,11 @@ PT_DML_EXPORT std::int32_t pt_dml_self_test(
     PtDmlDevice* device,
     char* error,
     std::uint32_t error_bytes);
+PT_DML_EXPORT std::int32_t pt_dml_add_f32(
+    PtDmlDevice* device,
+    const float* left,
+    const float* right,
+    float* output,
+    std::uint64_t element_count,
+    char* error,
+    std::uint32_t error_bytes);

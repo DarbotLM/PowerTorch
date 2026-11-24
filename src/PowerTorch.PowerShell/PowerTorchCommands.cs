@@ -384,8 +384,37 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
     [Parameter]
     public Tensor? Right { get; set; }
 
+    [Parameter]
+    [ValidateSet("Cpu", "DirectML")]
+    public string Backend { get; set; } = "Cpu";
+
     protected override void ProcessRecord()
     {
+        if (Backend == "DirectML")
+        {
+            if (Operation != "Add")
+            {
+                throw new PowerTorchException(
+                    PowerTorchErrorCategory.Unsupported,
+                    "The DirectML host bridge currently supports only Add.");
+            }
+            var right = RequireRight();
+            if (Left.DataType != DataType.Float32 ||
+                right.DataType != DataType.Float32 ||
+                !Left.Shape.SequenceEqual(right.Shape))
+            {
+                throw new PowerTorchException(
+                    PowerTorchErrorCategory.ShapeMismatch,
+                    "DirectML Add currently requires equal-shape Float32 CPU tensors.");
+            }
+            using var directML = DirectMLBackend.Create();
+            float[] values = directML.AddF32(
+                Left.AsSpan<float>(),
+                right.AsSpan<float>());
+            WriteObject(TensorFactory.FromArray(values, Left.Shape));
+            return;
+        }
+
         var runtime = new PowerTorchRuntime();
         runtime.Register(new CpuBackend());
         Tensor result = Operation switch

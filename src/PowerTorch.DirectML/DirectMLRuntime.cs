@@ -70,6 +70,7 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
             ["device_enumeration"] = true,
             ["fence_synchronization"] = false,
             ["tensor.add"] = false,
+            ["host_f32.add"] = true,
             ["graph_compile"] = false,
             ["autograd"] = false,
         });
@@ -78,6 +79,12 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _deviceHandle.SelfTest();
+    }
+
+    public float[] AddF32(ReadOnlySpan<float> left, ReadOnlySpan<float> right)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _deviceHandle.AddF32(left, right);
     }
 
     public Tensor Add(Tensor left, Tensor right) => throw Unsupported("tensor.add");
