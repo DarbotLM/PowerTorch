@@ -58,6 +58,16 @@
           "backends": ["cpu"]
         },
         {
+          "name": "CPU concat, KV cache append, arg-max, normal initialization, and sin/cos",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "managed host residency and host copy",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
           "name": "device transfer and persistent tensor residency",
           "status": "planned",
           "backends": ["directml", "cuda"]

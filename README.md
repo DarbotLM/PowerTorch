@@ -15,7 +15,8 @@ the verified foundation, not full PyTorch parity.
 - .NET 11 managed tensor/storage and shape/stride contracts.
 - CPU float/bfloat16 tensor arithmetic plus reshape, permute/transpose, slice,
   batched matmul, softmax, layer/RMS norm, embedding, grouped/causal Conv1D,
-  rotary embeddings, and causal grouped-query attention.
+  rotary embeddings, causal grouped-query attention, concatenation/KV-cache
+  append, arg-max, normal initialization, and sin/cos.
 - Reverse-mode autograd and one-step AdamW for float32/float64.
 - Native C++/DirectML device creation, synchronization, and float32
   element-wise add over a D3D12/DirectML compiled operator.
@@ -24,6 +25,8 @@ the verified foundation, not full PyTorch parity.
 - ONNX Runtime DirectML model loading in an isolated native .NET process.
 - Binary PowerShell module with device, tensor, checkpoint, ONNX, backward,
   optimizer, and health cmdlets.
+- Explicit managed-host residency and safe CPU host-copy transfer; accelerator
+  transfers remain unavailable until device-owned tensors exist.
 - Real-checkpoint verification against the existing Florence safetensors file.
 
 ## Verified snapshot
@@ -31,7 +34,7 @@ the verified foundation, not full PyTorch parity.
 The latest local verification records:
 
 - Release/Debug build: 0 warnings, 0 errors.
-- 10 synthetic xUnit checks and 2 synthetic Pester CPU operation checks passed
+- 12 synthetic xUnit checks and 3 synthetic Pester CPU operation checks passed
   in the current environment.
 - DirectML health verified on NVIDIA T1000 8GB.
 - Native DirectML add matched CPU on real Florence tensor data.

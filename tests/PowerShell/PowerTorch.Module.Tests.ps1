@@ -80,6 +80,31 @@ Describe 'PowerTorch binary module' {
         $attention.Dispose()
     }
 
+    It 'executes cache sampling trig random and host residency operations' {
+        $cache = New-PowerTorchTensor -Float32 1, 2, 3, 4 -Shape 1, 1, 2, 2
+        $update = New-PowerTorchTensor -Float32 5, 6 -Shape 1, 1, 1, 2
+        $appended = Invoke-PowerTorchOperation `
+            -Operation KvCacheAppend -Left $cache -Right $update
+        $indices = Invoke-PowerTorchOperation -Operation ArgMax -Left $appended
+        $normal = Invoke-PowerTorchOperation `
+            -Operation RandomNormal -Shape 4 -DataType BFloat16 -Seed 42
+        $sine = Invoke-PowerTorchOperation -Operation Sin -Left $normal
+        $hostCopy = Invoke-PowerTorchOperation -Operation Transfer -Left $normal
+
+        (Get-PowerTorchTensor -Tensor $appended).Shape | Should -Be @(1, 1, 3, 2)
+        (Get-PowerTorchTensor -Tensor $indices).DataType | Should -Be 'Int64'
+        (Get-PowerTorchTensor -Tensor $normal).DataType | Should -Be 'BFloat16'
+        (Get-PowerTorchTensor -Tensor $sine).DataType | Should -Be 'BFloat16'
+        (Get-PowerTorchTensor -Tensor $hostCopy).Residency | Should -Be 'HostManaged'
+        $cache.Dispose()
+        $update.Dispose()
+        $appended.Dispose()
+        $indices.Dispose()
+        $normal.Dispose()
+        $sine.Dispose()
+        $hostCopy.Dispose()
+    }
+
     It 'parses the real Florence safetensors checkpoint' {
         $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
             'OmniParser\weights\florence31_icon_caption\model.safetensors'

@@ -2,6 +2,12 @@ using System.Runtime.InteropServices;
 
 namespace PowerTorch.Core;
 
+public enum TensorResidency
+{
+    HostManaged,
+    Device,
+}
+
 public sealed class Tensor : IDisposable
 {
     private readonly TensorStorage _storage;
@@ -42,6 +48,11 @@ public sealed class Tensor : IDisposable
     public IReadOnlyList<long> Strides => Descriptor.Strides;
 
     public bool IsContiguous => Descriptor.IsContiguous;
+
+    public bool IsHostResident => Device.Kind == DeviceKind.Cpu;
+
+    public TensorResidency Residency =>
+        IsHostResident ? TensorResidency.HostManaged : TensorResidency.Device;
 
     public Span<T> AsSpan<T>() where T : unmanaged
     {

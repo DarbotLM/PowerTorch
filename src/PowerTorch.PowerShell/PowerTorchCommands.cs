@@ -252,7 +252,8 @@ public sealed class GetPowerTorchTensorCommand : PSCmdlet
             Tensor.Shape.ToArray(),
             Tensor.Strides.ToArray(),
             Tensor.ElementCount,
-            Tensor.IsContiguous));
+            Tensor.IsContiguous,
+            Tensor.Residency.ToString()));
     }
 }
 
@@ -445,15 +446,25 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
         "Embedding",
         "Conv1D",
         "Rotary",
-        "CausalAttention")]
+        "CausalAttention",
+        "Concat",
+        "KvCacheAppend",
+        "ArgMax",
+        "RandomNormal",
+        "Sin",
+        "Cos",
+        "Transfer")]
     public string Operation { get; set; } = string.Empty;
 
-    [Parameter(Mandatory = true)]
+    [Parameter]
     [ValidateNotNull]
-    public Tensor Left { get; set; } = null!;
+    public Tensor? Left { get; set; }
 
     [Parameter]
     public Tensor? Right { get; set; }
+
+    [Parameter]
+    public Tensor[] AdditionalInputs { get; set; } = [];
 
     [Parameter]
     public long[] Shape { get; set; } = [];
@@ -528,6 +539,20 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
     public double? Scale { get; set; }
 
     [Parameter]
+    [ValidateSet("BFloat16", "Float32", "Float64")]
+    public string DataType { get; set; } = "Float32";
+
+    [Parameter]
+    public double Mean { get; set; }
+
+    [Parameter]
+    [ValidateRange(0.0, double.MaxValue)]
+    public double StandardDeviation { get; set; } = 1.0;
+
+    [Parameter]
+    public int? Seed { get; set; }
+
+    [Parameter]
     [ValidateSet("Cpu", "DirectML")]
     public string Backend { get; set; } = "Cpu";
 
@@ -541,10 +566,11 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
                     PowerTorchErrorCategory.Unsupported,
                     "The DirectML host bridge currently supports only Add.");
             }
+            var left = RequireLeft();
             var right = RequireRight();
-            if (Left.DataType != DataType.Float32 ||
-                right.DataType != DataType.Float32 ||
-                !Left.Shape.SequenceEqual(right.Shape))
+            if (left.DataType != PowerTorch.DataType.Float32 ||
+                right.DataType != PowerTorch.DataType.Float32 ||
+                !left.Shape.SequenceEqual(right.Shape))
             {
                 throw new PowerTorchException(
                     PowerTorchErrorCategory.ShapeMismatch,
@@ -552,9 +578,9 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
             }
             using var directML = DirectMLBackend.Create();
             float[] values = directML.AddF32(
-                Left.AsSpan<float>(),
+                left.AsSpan<float>(),
                 right.AsSpan<float>());
-            WriteObject(TensorFactory.FromArray(values, Left.Shape));
+            WriteObject(TensorFactory.FromArray(values, left.Shape));
             return;
         }
 
@@ -562,29 +588,35 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
         runtime.Register(new CpuBackend());
         Tensor result = Operation switch
         {
-            "Add" => runtime.Add(Left, RequireRight()),
-            "Multiply" => runtime.Multiply(Left, RequireRight()),
-            "Subtract" => runtime.Subtract(Left, RequireRight()),
-            "Divide" => runtime.Divide(Left, RequireRight()),
-            "Sigmoid" => runtime.Sigmoid(Left),
-            "Sum" => runtime.Sum(Left),
-            "Mean" => runtime.Mean(Left),
-            "Reshape" => runtime.Reshape(Left, RequireShape()),
-            "Permute" => runtime.Permute(Left, RequirePermutation()),
-            "Transpose" => runtime.Transpose(Left, Dimension, SecondDimension),
+            "Add" => runtime.Add(RequireLeft(), RequireRight()),
+            "Multiply" => runtime.Multiply(RequireLeft(), RequireRight()),
+            "Subtract" => runtime.Subtract(RequireLeft(), RequireRight()),
+            "Divide" => runtime.Divide(RequireLeft(), RequireRight()),
+            "Sigmoid" => runtime.Sigmoid(RequireLeft()),
+            "Sum" => runtime.Sum(RequireLeft()),
+            "Mean" => runtime.Mean(RequireLeft()),
+            "Reshape" => runtime.Reshape(RequireLeft(), RequireShape()),
+            "Permute" => runtime.Permute(RequireLeft(), RequirePermutation()),
+            "Transpose" => runtime.Transpose(RequireLeft(), Dimension, SecondDimension),
             "Slice" => runtime.Slice(
-                Left,
+                RequireLeft(),
                 Dimension,
                 Start,
-                End ?? Left.Shape[NormalizeDimension(Dimension, Left.Shape.Count)],
+                End ?? RequireLeft().Shape[
+                    NormalizeDimension(Dimension, RequireLeft().Shape.Count)],
                 Step),
-            "Matmul" => runtime.Matmul(Left, RequireRight()),
-            "Softmax" => runtime.Softmax(Left, Dimension),
-            "LayerNorm" => runtime.LayerNorm(Left, RequireShape(), Weight, Bias, Epsilon),
-            "RmsNorm" => runtime.RmsNorm(Left, RequireShape(), Weight, Epsilon),
-            "Embedding" => runtime.Embedding(Left, RequireRight()),
+            "Matmul" => runtime.Matmul(RequireLeft(), RequireRight()),
+            "Softmax" => runtime.Softmax(RequireLeft(), Dimension),
+            "LayerNorm" => runtime.LayerNorm(
+                RequireLeft(),
+                RequireShape(),
+                Weight,
+                Bias,
+                Epsilon),
+            "RmsNorm" => runtime.RmsNorm(RequireLeft(), RequireShape(), Weight, Epsilon),
+            "Embedding" => runtime.Embedding(RequireLeft(), RequireRight()),
             "Conv1D" => runtime.Conv1D(
-                Left,
+                RequireLeft(),
                 RequireRight(),
                 Bias,
                 Stride,
@@ -593,17 +625,29 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
                 Groups,
                 Causal.IsPresent),
             "Rotary" => runtime.Rotary(
-                Left,
+                RequireLeft(),
                 RequirePositions(),
                 SequenceDimension,
                 RotaryDimension,
                 BaseFrequency,
                 Interleaved.IsPresent),
             "CausalAttention" => runtime.CausalAttention(
-                Left,
+                RequireLeft(),
                 RequireRight(),
                 RequireValue(),
                 Scale),
+            "Concat" => runtime.Concat(RequireConcatInputs(), Dimension),
+            "KvCacheAppend" => runtime.KvCacheAppend(RequireLeft(), RequireRight()),
+            "ArgMax" => runtime.ArgMax(RequireLeft(), Dimension),
+            "RandomNormal" => runtime.RandomNormal(
+                Enum.Parse<PowerTorch.DataType>(DataType),
+                RequireShape(),
+                Mean,
+                StandardDeviation,
+                Seed),
+            "Sin" => runtime.Sin(RequireLeft()),
+            "Cos" => runtime.Cos(RequireLeft()),
+            "Transfer" => runtime.Transfer(RequireLeft(), Device.Cpu),
             _ => throw new InvalidOperationException($"Unknown operation '{Operation}'."),
         };
         WriteObject(result);
@@ -616,6 +660,20 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
             throw new ArgumentException($"Operation '{Operation}' requires -Right.");
         }
         return Right;
+    }
+
+    private Tensor RequireLeft() =>
+        Left ?? throw new ArgumentException($"Operation '{Operation}' requires -Left.");
+
+    private Tensor[] RequireConcatInputs()
+    {
+        var inputs = new List<Tensor> { RequireLeft() };
+        if (Right is not null)
+        {
+            inputs.Add(Right);
+        }
+        inputs.AddRange(AdditionalInputs);
+        return inputs.ToArray();
     }
 
     private long[] RequireShape()
@@ -809,4 +867,5 @@ public sealed record PowerTorchTensorInfo(
     IReadOnlyList<long> Shape,
     IReadOnlyList<long> Strides,
     long ElementCount,
-    bool IsContiguous);
+    bool IsContiguous,
+    string Residency);

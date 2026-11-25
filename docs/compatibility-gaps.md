@@ -47,8 +47,11 @@ slices.
   slice, batched matmul, softmax, layer norm, and RMS norm
 - CPU BF16/float32 embedding, causal grouped/depthwise Conv1D, rotary embeddings,
   and causal GQA attention
+- CPU concat/KV-cache append, arg-max, normal initialization, and sin/cos
 - Safe indexed sharded-safetensors state loading with per-tensor and aggregate
   byte limits
+- Managed-host residency and safe host-to-host copies; accelerator transfer
+  remains planned pending persistent device-owned tensor storage
 - Reverse-mode sigmoid/sum/mean and arithmetic gradients
 - AdamW float32/float64 state and one optimizer step
 - DirectML ONNX metadata loading in an isolated native process

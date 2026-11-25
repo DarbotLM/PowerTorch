@@ -28,6 +28,13 @@ public sealed class TensorContractTests
         Assert.True(capabilities.Features["tensor.conv1d"]);
         Assert.True(capabilities.Features["tensor.rotary"]);
         Assert.True(capabilities.Features["tensor.causal_attention"]);
+        Assert.True(capabilities.Features["tensor.concat"]);
+        Assert.True(capabilities.Features["tensor.kv_cache_append"]);
+        Assert.True(capabilities.Features["tensor.arg_max"]);
+        Assert.True(capabilities.Features["tensor.random_normal"]);
+        Assert.True(capabilities.Features["tensor.trigonometric"]);
+        Assert.True(capabilities.Features["tensor.host_residency"]);
+        Assert.False(capabilities.Features["device.transfer"]);
         Assert.True(capabilities.Features["model.safe_state_load"]);
         Assert.True(capabilities.Features["model.sharded_checkpoint"]);
     }
@@ -220,6 +227,79 @@ public sealed class TensorContractTests
             5.0f, 6.0f, 6.0f, 7.0f,
         ];
         Assert.Equal(expected, attention.AsSpan<float>().ToArray());
+    }
+
+    [Fact]
+    public void CpuConcatKvAppendAndArgMaxAreCorrectForBFloat16()
+    {
+        var runtime = CreateRuntime();
+        BFloat16[] first =
+        [
+            (BFloat16)1.0f,
+            (BFloat16)4.0f,
+            (BFloat16)2.0f,
+            (BFloat16)3.0f,
+        ];
+        BFloat16[] second =
+        [
+            (BFloat16)5.0f,
+            (BFloat16)0.0f,
+            (BFloat16)6.0f,
+            (BFloat16)(-1.0f),
+        ];
+        using var left = TensorFactory.FromArray(first, [1, 1, 2, 2]);
+        using var right = TensorFactory.FromArray(second, [1, 1, 2, 2]);
+        using var concatenated = runtime.Concat([left, right], 2);
+        Assert.Equal(new long[] { 1, 1, 4, 2 }, concatenated.Shape);
+        Assert.Equal(
+            [1.0f, 4.0f, 2.0f, 3.0f, 5.0f, 0.0f, 6.0f, -1.0f],
+            concatenated.AsSpan<BFloat16>().ToArray()
+                .Select(value => (float)value)
+                .ToArray());
+
+        using var cache = runtime.KvCacheAppend(left, right);
+        Assert.Equal(concatenated.Shape, cache.Shape);
+        using var argMax = runtime.ArgMax(cache, -1);
+        Assert.Equal(new long[] { 1, 1, 4 }, argMax.Shape);
+        Assert.Equal([1L, 1L, 0L, 0L], argMax.AsSpan<long>().ToArray());
+    }
+
+    [Fact]
+    public void CpuRandomNormalTrigAndHostTransferPreserveContracts()
+    {
+        var runtime = CreateRuntime();
+        using var first = runtime.RandomNormal(
+            DataType.BFloat16,
+            [4],
+            mean: 2,
+            standardDeviation: 0.5,
+            seed: 8675309);
+        using var second = runtime.RandomNormal(
+            DataType.BFloat16,
+            [4],
+            mean: 2,
+            standardDeviation: 0.5,
+            seed: 8675309);
+        Assert.Equal(
+            first.AsSpan<BFloat16>().ToArray(),
+            second.AsSpan<BFloat16>().ToArray());
+
+        using var angles = TensorFactory.FromArray(
+            [0.0f, MathF.PI / 2.0f],
+            [2]);
+        using var sine = runtime.Sin(angles);
+        using var cosine = runtime.Cos(angles);
+        Assert.Equal([0.0f, 1.0f], sine.AsSpan<float>().ToArray());
+        Assert.Equal(1.0f, cosine.AsSpan<float>()[0], precision: 6);
+        Assert.Equal(0.0f, cosine.AsSpan<float>()[1], precision: 6);
+
+        using var hostCopy = runtime.ToHost(first);
+        Assert.True(hostCopy.IsHostResident);
+        Assert.Equal(TensorResidency.HostManaged, hostCopy.Residency);
+        Assert.Equal(
+            first.AsSpan<BFloat16>().ToArray(),
+            hostCopy.AsSpan<BFloat16>().ToArray());
+        Assert.NotSame(first, hostCopy);
     }
 
     [Fact]

@@ -72,6 +72,12 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
             ["tensor.add"] = false,
             ["host_f32.add"] = true,
             ["graph_compile"] = false,
+            ["tensor.concat"] = false,
+            ["tensor.kv_cache_append"] = false,
+            ["tensor.arg_max"] = false,
+            ["tensor.random_normal"] = false,
+            ["tensor.trigonometric"] = false,
+            ["tensor.host_residency"] = true,
             ["device.transfer"] = false,
             ["tensor_residency"] = false,
             ["autograd"] = false,
@@ -169,6 +175,30 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
         Tensor value,
         double? scale) =>
         throw Unsupported("tensor.causal_attention");
+
+    public Tensor Concat(IReadOnlyList<Tensor> inputs, int dimension) =>
+        throw Unsupported("tensor.concat");
+
+    public Tensor KvCacheAppend(Tensor cache, Tensor update) =>
+        throw Unsupported("tensor.kv_cache_append");
+
+    public Tensor ArgMax(Tensor input, int dimension) =>
+        throw Unsupported("tensor.arg_max");
+
+    public Tensor RandomNormal(
+        DataType dataType,
+        IReadOnlyList<long> shape,
+        double mean,
+        double standardDeviation,
+        int? seed) =>
+        throw Unsupported("tensor.random_normal");
+
+    public Tensor Sin(Tensor input) => throw Unsupported("tensor.trigonometric");
+
+    public Tensor Cos(Tensor input) => throw Unsupported("tensor.trigonometric");
+
+    public Tensor Transfer(Tensor input, Device target) =>
+        throw Unsupported("device.transfer");
 
     public void Dispose()
     {

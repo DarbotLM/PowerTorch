@@ -156,6 +156,59 @@ public sealed class PowerTorchRuntime
         return Resolve(query).CausalAttention(query, key, value, scale);
     }
 
+    public Tensor Concat(IReadOnlyList<Tensor> inputs, int dimension)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        if (inputs.Count == 0)
+        {
+            throw new ArgumentException("Concat requires at least one tensor.", nameof(inputs));
+        }
+        ITensorBackend backend = Resolve(inputs[0]);
+        for (int index = 1; index < inputs.Count; index++)
+        {
+            ResolveCompatible(inputs[0], inputs[index]);
+        }
+        return backend.Concat(inputs, dimension);
+    }
+
+    public Tensor KvCacheAppend(Tensor cache, Tensor update) =>
+        ResolveCompatible(cache, update).KvCacheAppend(cache, update);
+
+    public Tensor ArgMax(Tensor input, int dimension = -1) =>
+        Resolve(input).ArgMax(input, dimension);
+
+    public Tensor RandomNormal(
+        DataType dataType,
+        IReadOnlyList<long> shape,
+        double mean = 0,
+        double standardDeviation = 1,
+        int? seed = null,
+        Device? device = null)
+    {
+        Device target = device ?? Device.Cpu;
+        if (target != Device.Cpu)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Unsupported,
+                "RandomNormal currently supports only managed CPU residency.");
+        }
+        return GetBackend(target.Kind).RandomNormal(
+            dataType,
+            shape,
+            mean,
+            standardDeviation,
+            seed);
+    }
+
+    public Tensor Sin(Tensor input) => Resolve(input).Sin(input);
+
+    public Tensor Cos(Tensor input) => Resolve(input).Cos(input);
+
+    public Tensor Transfer(Tensor input, Device target) =>
+        GetBackend(target.Kind).Transfer(input, target);
+
+    public Tensor ToHost(Tensor input) => Transfer(input, Device.Cpu);
+
     private ITensorBackend Resolve(Tensor left, Tensor right)
     {
         if (left.Device != right.Device)

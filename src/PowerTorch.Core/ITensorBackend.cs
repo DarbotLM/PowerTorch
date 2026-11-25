@@ -70,4 +70,23 @@ public interface ITensorBackend
         Tensor key,
         Tensor value,
         double? scale);
+
+    Tensor Concat(IReadOnlyList<Tensor> inputs, int dimension);
+
+    Tensor KvCacheAppend(Tensor cache, Tensor update);
+
+    Tensor ArgMax(Tensor input, int dimension);
+
+    Tensor RandomNormal(
+        DataType dataType,
+        IReadOnlyList<long> shape,
+        double mean,
+        double standardDeviation,
+        int? seed);
+
+    Tensor Sin(Tensor input);
+
+    Tensor Cos(Tensor input);
+
+    Tensor Transfer(Tensor input, Device target);
 }

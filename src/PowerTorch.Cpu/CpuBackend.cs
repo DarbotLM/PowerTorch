@@ -39,10 +39,16 @@ public sealed class CpuBackend : ITensorBackend
             ["tensor.rotary"] = true,
             ["tensor.causal_attention"] = true,
             ["tensor.conv1d"] = true,
+            ["tensor.concat"] = true,
+            ["tensor.kv_cache_append"] = true,
+            ["tensor.arg_max"] = true,
+            ["tensor.random_normal"] = true,
+            ["tensor.trigonometric"] = true,
+            ["tensor.host_residency"] = true,
+            ["tensor_residency"] = true,
             ["model.safe_state_load"] = true,
             ["model.sharded_checkpoint"] = true,
             ["device.transfer"] = false,
-            ["tensor_residency"] = false,
             ["autograd"] = false,
             ["graph_capture"] = false,
         });
@@ -604,6 +610,271 @@ public sealed class CpuBackend : ITensorBackend
             }
         }
         return FromFloatingValues(query.DataType, query.Shape.ToArray(), outputValues);
+    }
+
+    public Tensor Concat(IReadOnlyList<Tensor> inputs, int dimension)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        if (inputs.Count == 0)
+        {
+            throw new ArgumentException("Concat requires at least one tensor.", nameof(inputs));
+        }
+        int rank = inputs[0].Shape.Count;
+        dimension = NormalizeDimension(dimension, rank);
+        long[] outputShape = inputs[0].Shape.ToArray();
+        outputShape[dimension] = 0;
+        foreach (Tensor input in inputs)
+        {
+            if (input.Shape.Count != rank || input.DataType != inputs[0].DataType)
+            {
+                throw new PowerTorchException(
+                    PowerTorchErrorCategory.ShapeMismatch,
+                    "Concat inputs must have matching rank and dtype.");
+            }
+            for (int current = 0; current < rank; current++)
+            {
+                if (current != dimension && input.Shape[current] != inputs[0].Shape[current])
+                {
+                    throw new PowerTorchException(
+                        PowerTorchErrorCategory.ShapeMismatch,
+                        "Concat inputs may differ only on the selected dimension.");
+                }
+            }
+            outputShape[dimension] = checked(outputShape[dimension] + input.Shape[dimension]);
+        }
+
+        Tensor output = TensorFactory.Empty(inputs[0].DataType, outputShape);
+        int elementSize = DataTypeInfo.ElementSize(inputs[0].DataType);
+        long outer = Product(outputShape.Take(dimension));
+        long inner = Product(outputShape.Skip(dimension + 1));
+        long outputDimension = outputShape[dimension];
+        long outputDimensionOffset = 0;
+        foreach (Tensor input in inputs)
+        {
+            long inputDimension = input.Shape[dimension];
+            for (long outerIndex = 0; outerIndex < outer; outerIndex++)
+            {
+                long sourceElementOffset =
+                    (outerIndex * inputDimension) * inner;
+                long destinationElementOffset =
+                    ((outerIndex * outputDimension) + outputDimensionOffset) * inner;
+                int byteCount = checked((int)(inputDimension * inner * elementSize));
+                input.RawBytes.Slice(
+                        checked((int)(sourceElementOffset * elementSize)),
+                        byteCount)
+                    .CopyTo(output.RawBytes.Slice(
+                        checked((int)(destinationElementOffset * elementSize)),
+                        byteCount));
+            }
+            outputDimensionOffset += inputDimension;
+        }
+        return output;
+    }
+
+    public Tensor KvCacheAppend(Tensor cache, Tensor update)
+    {
+        if (cache.Shape.Count < 2 ||
+            update.Shape.Count != cache.Shape.Count ||
+            cache.DataType != update.DataType)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "KV cache and update must have equal rank and dtype, with rank at least two.");
+        }
+        return Concat([cache, update], cache.Shape.Count - 2);
+    }
+
+    public Tensor ArgMax(Tensor input, int dimension)
+    {
+        dimension = NormalizeDimension(dimension, input.Shape.Count);
+        if (input.Shape[dimension] == 0)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "ArgMax cannot reduce an empty dimension.");
+        }
+        long[] outputShape = input.Shape
+            .Where((_, index) => index != dimension)
+            .ToArray();
+        Tensor output = TensorFactory.Empty(DataType.Int64, outputShape);
+        var destination = output.AsSpan<long>();
+        int outputIndex = 0;
+        long inner = Product(input.Shape.Skip(dimension + 1));
+        long outer = Product(input.Shape.Take(dimension));
+        long width = input.Shape[dimension];
+        for (long outerIndex = 0; outerIndex < outer; outerIndex++)
+        {
+            for (long innerIndex = 0; innerIndex < inner; innerIndex++)
+            {
+                double best = double.NegativeInfinity;
+                long bestIndex = 0;
+                for (long index = 0; index < width; index++)
+                {
+                    long flat = (outerIndex * width * inner) + (index * inner) + innerIndex;
+                    double value = ReadNumericElement(input, flat);
+                    if (value > best)
+                    {
+                        best = value;
+                        bestIndex = index;
+                    }
+                }
+                destination[outputIndex++] = bestIndex;
+            }
+        }
+        return output;
+    }
+
+    public Tensor RandomNormal(
+        DataType dataType,
+        IReadOnlyList<long> shape,
+        double mean,
+        double standardDeviation,
+        int? seed)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        if (!double.IsFinite(mean) ||
+            !double.IsFinite(standardDeviation) ||
+            standardDeviation < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(standardDeviation),
+                "Normal mean and standard deviation must be finite, with non-negative deviation.");
+        }
+        if (dataType is not (DataType.BFloat16 or DataType.Float32 or DataType.Float64))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Unsupported,
+                $"RandomNormal requires a floating dtype; received '{dataType}'.");
+        }
+        Tensor output = TensorFactory.Empty(dataType, shape.ToArray());
+        var random = seed is null ? Random.Shared : new Random(seed.Value);
+        bool hasSpare = false;
+        double spare = 0;
+        double NextNormal()
+        {
+            if (hasSpare)
+            {
+                hasSpare = false;
+                return spare;
+            }
+            double first;
+            double second;
+            double radiusSquared;
+            do
+            {
+                first = (2.0 * random.NextDouble()) - 1.0;
+                second = (2.0 * random.NextDouble()) - 1.0;
+                radiusSquared = (first * first) + (second * second);
+            }
+            while (radiusSquared <= double.Epsilon || radiusSquared >= 1.0);
+            double multiplier = Math.Sqrt(
+                -2.0 * Math.Log(radiusSquared) / radiusSquared);
+            spare = second * multiplier;
+            hasSpare = true;
+            return first * multiplier;
+        }
+
+        switch (dataType)
+        {
+            case DataType.BFloat16:
+                Span<BFloat16> bf16 = output.AsSpan<BFloat16>();
+                for (int index = 0; index < bf16.Length; index++)
+                {
+                    bf16[index] = (BFloat16)((mean + (NextNormal() * standardDeviation)));
+                }
+                break;
+            case DataType.Float32:
+                Span<float> float32 = output.AsSpan<float>();
+                for (int index = 0; index < float32.Length; index++)
+                {
+                    float32[index] = (float)(mean + (NextNormal() * standardDeviation));
+                }
+                break;
+            case DataType.Float64:
+                Span<double> float64 = output.AsSpan<double>();
+                for (int index = 0; index < float64.Length; index++)
+                {
+                    float64[index] = mean + (NextNormal() * standardDeviation);
+                }
+                break;
+        }
+        return output;
+    }
+
+    public Tensor Sin(Tensor input) => Trigonometric(input, Math.Sin, MathF.Sin);
+
+    public Tensor Cos(Tensor input) => Trigonometric(input, Math.Cos, MathF.Cos);
+
+    public Tensor Transfer(Tensor input, Device target)
+    {
+        if (target.Kind != DeviceKind.Cpu || input.Device.Kind != DeviceKind.Cpu)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Unsupported,
+                "The CPU backend supports only managed host-to-host copies; " +
+                "persistent accelerator transfers are not implemented.");
+        }
+        if (target != Device.Cpu)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Backend,
+                $"Invalid CPU target '{target}'.");
+        }
+        return input.Clone();
+    }
+
+    private static Tensor Trigonometric(
+        Tensor input,
+        Func<double, double> doubleOperation,
+        Func<float, float> floatOperation)
+    {
+        Tensor output = TensorFactory.Empty(input.DataType, input.Shape.ToArray());
+        switch (input.DataType)
+        {
+            case DataType.BFloat16:
+                Span<BFloat16> bf16Input = input.AsSpan<BFloat16>();
+                Span<BFloat16> bf16Output = output.AsSpan<BFloat16>();
+                for (int index = 0; index < bf16Output.Length; index++)
+                {
+                    bf16Output[index] = (BFloat16)floatOperation(bf16Input[index]);
+                }
+                break;
+            case DataType.Float32:
+                Span<float> floatInput = input.AsSpan<float>();
+                Span<float> floatOutput = output.AsSpan<float>();
+                for (int index = 0; index < floatOutput.Length; index++)
+                {
+                    floatOutput[index] = floatOperation(floatInput[index]);
+                }
+                break;
+            case DataType.Float64:
+                Span<double> doubleInput = input.AsSpan<double>();
+                Span<double> doubleOutput = output.AsSpan<double>();
+                for (int index = 0; index < doubleOutput.Length; index++)
+                {
+                    doubleOutput[index] = doubleOperation(doubleInput[index]);
+                }
+                break;
+            default:
+                throw new PowerTorchException(
+                    PowerTorchErrorCategory.Unsupported,
+                    $"Trigonometric operations require a floating dtype; received '{input.DataType}'.");
+        }
+        return output;
+    }
+
+    private static double ReadNumericElement(Tensor tensor, long index)
+    {
+        int offset = checked((int)index);
+        return tensor.DataType switch
+        {
+            DataType.BFloat16 => tensor.AsSpan<BFloat16>()[offset],
+            DataType.Float32 => tensor.AsSpan<float>()[offset],
+            DataType.Float64 => tensor.AsSpan<double>()[offset],
+            DataType.Int32 => tensor.AsSpan<int>()[offset],
+            DataType.Int64 => tensor.AsSpan<long>()[offset],
+            _ => throw Unsupported(tensor.DataType),
+        };
     }
 
     private static void ValidateConv1D(
