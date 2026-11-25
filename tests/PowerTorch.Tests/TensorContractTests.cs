@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.Json;
 using PowerTorch.Core;
 using PowerTorch.Cpu;
 using PowerTorch.Serialization;
@@ -23,6 +24,12 @@ public sealed class TensorContractTests
         Assert.True(capabilities.Features["tensor.softmax"]);
         Assert.True(capabilities.Features["tensor.layer_norm"]);
         Assert.True(capabilities.Features["tensor.rms_norm"]);
+        Assert.True(capabilities.Features["tensor.embedding"]);
+        Assert.True(capabilities.Features["tensor.conv1d"]);
+        Assert.True(capabilities.Features["tensor.rotary"]);
+        Assert.True(capabilities.Features["tensor.causal_attention"]);
+        Assert.True(capabilities.Features["model.safe_state_load"]);
+        Assert.True(capabilities.Features["model.sharded_checkpoint"]);
     }
 
     [Fact]
@@ -147,6 +154,130 @@ public sealed class TensorContractTests
     }
 
     [Fact]
+    public void CpuEmbeddingAndDepthwiseCausalConvAreCorrect()
+    {
+        var runtime = CreateRuntime();
+        BFloat16[] weightValues =
+        [
+            (BFloat16)1.0f,
+            (BFloat16)2.0f,
+            (BFloat16)3.0f,
+            (BFloat16)4.0f,
+            (BFloat16)5.0f,
+            (BFloat16)6.0f,
+        ];
+        using var weight = TensorFactory.FromArray(weightValues, [3, 2]);
+        using var indices = TensorFactory.FromArray([2L, 0L], [2]);
+        using var embedded = runtime.Embedding(weight, indices);
+        Assert.Equal([5.0f, 6.0f, 1.0f, 2.0f],
+            embedded.AsSpan<BFloat16>().ToArray().Select(value => (float)value).ToArray());
+
+        using var input = TensorFactory.FromArray(
+            [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f],
+            [1, 2, 3]);
+        using var kernels = TensorFactory.FromArray(
+            [1.0f, 1.0f, 2.0f, 1.0f],
+            [2, 1, 2]);
+        using var output = runtime.Conv1D(
+            input,
+            kernels,
+            groups: 2,
+            causal: true);
+
+        Assert.Equal(new long[] { 1, 2, 3 }, output.Shape);
+        Assert.Equal(
+            [1.0f, 3.0f, 5.0f, 4.0f, 13.0f, 16.0f],
+            output.AsSpan<float>().ToArray());
+    }
+
+    [Fact]
+    public void CpuRotaryAndCausalGroupedQueryAttentionAreCorrect()
+    {
+        var runtime = CreateRuntime();
+        using var input = TensorFactory.FromArray(
+            [1.0f, 0.0f, 1.0f, 0.0f],
+            [1, 1, 2, 2]);
+        using var positions = TensorFactory.FromArray([0L, 1L], [2]);
+        using var rotary = runtime.Rotary(input, positions);
+        Assert.Equal(1.0f, rotary.AsSpan<float>()[0], precision: 6);
+        Assert.Equal(0.0f, rotary.AsSpan<float>()[1], precision: 6);
+        Assert.Equal(MathF.Cos(1.0f), rotary.AsSpan<float>()[2], precision: 6);
+        Assert.Equal(MathF.Sin(1.0f), rotary.AsSpan<float>()[3], precision: 6);
+
+        using var query = TensorFactory.FromArray(new float[16], [1, 4, 2, 2]);
+        using var key = TensorFactory.FromArray(new float[8], [1, 2, 2, 2]);
+        using var value = TensorFactory.FromArray(
+            [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f],
+            [1, 2, 2, 2]);
+        using var attention = runtime.CausalAttention(query, key, value);
+
+        Assert.Equal(query.Shape, attention.Shape);
+        float[] expected =
+        [
+            1.0f, 2.0f, 2.0f, 3.0f,
+            1.0f, 2.0f, 2.0f, 3.0f,
+            5.0f, 6.0f, 6.0f, 7.0f,
+            5.0f, 6.0f, 6.0f, 7.0f,
+        ];
+        Assert.Equal(expected, attention.AsSpan<float>().ToArray());
+    }
+
+    [Fact]
+    public async Task ShardedCheckpointLoadsOnlyIndexedTensorEntries()
+    {
+        string directory = Path.Combine(
+            AppContext.BaseDirectory,
+            $"powertorch-shards-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string firstShard = Path.Combine(directory, "model-00001.safetensors");
+            string secondShard = Path.Combine(directory, "model-00002.safetensors");
+            await WriteSafetensorsAsync(
+                firstShard,
+                "encoder.weight",
+                "F32",
+                [2],
+                [0, 0, 128, 63, 0, 0, 0, 64]);
+            await WriteSafetensorsAsync(
+                secondShard,
+                "decoder.weight",
+                "BF16",
+                [2],
+                [128, 63, 0, 64]);
+            string index = Path.Combine(directory, "model.safetensors.index.json");
+            await File.WriteAllTextAsync(
+                index,
+                """
+                {
+                  "metadata": { "format": "pt" },
+                  "weight_map": {
+                    "encoder.weight": "model-00001.safetensors",
+                    "decoder.weight": "model-00002.safetensors"
+                  }
+                }
+                """);
+
+            using var checkpoint = new ShardedSafetensorsCheckpoint(index);
+            using Tensor encoder = await checkpoint.LoadTensorAsync(
+                "encoder.weight",
+                maximumBytes: 8);
+            Assert.Equal([1.0f, 2.0f], encoder.AsSpan<float>().ToArray());
+            Assert.Throws<KeyNotFoundException>(
+                () => checkpoint.GetTensor("missing"));
+            await Assert.ThrowsAsync<PowerTorchException>(
+                async () => await checkpoint.LoadTensorAsync(
+                    "decoder.weight",
+                    maximumBytes: 2));
+            Assert.Equal(2, checkpoint.ShardPaths.Count);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RealSafetensorsCheckpointHasValidBoundedMetadata()
     {
         string path = RealAsset.FlorenceSafetensors();
@@ -242,6 +373,29 @@ public sealed class TensorContractTests
         var runtime = new PowerTorchRuntime();
         runtime.Register(new CpuBackend());
         return runtime;
+    }
+
+    private static async Task WriteSafetensorsAsync(
+        string path,
+        string tensorName,
+        string dataType,
+        long[] shape,
+        byte[] data)
+    {
+        string header = JsonSerializer.Serialize(
+            new Dictionary<string, object>
+            {
+                [tensorName] = new
+                {
+                    dtype = dataType,
+                    shape,
+                    data_offsets = new[] { 0L, data.LongLength },
+                },
+            });
+        byte[] headerBytes = Encoding.UTF8.GetBytes(header);
+        byte[] lengthBytes = new byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64LittleEndian(lengthBytes, (ulong)headerBytes.Length);
+        await File.WriteAllBytesAsync(path, [.. lengthBytes, .. headerBytes, .. data]);
     }
 }
 

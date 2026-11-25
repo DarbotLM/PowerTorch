@@ -35,6 +35,14 @@ public sealed class CpuBackend : ITensorBackend
             ["tensor.softmax"] = true,
             ["tensor.layer_norm"] = true,
             ["tensor.rms_norm"] = true,
+            ["tensor.embedding"] = true,
+            ["tensor.rotary"] = true,
+            ["tensor.causal_attention"] = true,
+            ["tensor.conv1d"] = true,
+            ["model.safe_state_load"] = true,
+            ["model.sharded_checkpoint"] = true,
+            ["device.transfer"] = false,
+            ["tensor_residency"] = false,
             ["autograd"] = false,
             ["graph_capture"] = false,
         });
@@ -334,6 +342,477 @@ public sealed class CpuBackend : ITensorBackend
     {
         ValidateNormalization(input, normalizedShape, weight, null, epsilon);
         return Normalize(input, normalizedShape, weight, null, epsilon, rmsOnly: true);
+    }
+
+    public Tensor Embedding(Tensor weight, Tensor indices)
+    {
+        if (weight.Shape.Count != 2)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Embedding weights must have [vocabulary, width] shape.");
+        }
+        if (weight.DataType is not (DataType.BFloat16 or DataType.Float32 or DataType.Float64))
+        {
+            throw Unsupported(weight.DataType);
+        }
+
+        long[] outputShape = [.. indices.Shape, weight.Shape[1]];
+        long rows = weight.Shape[0];
+        long width = weight.Shape[1];
+        int elementSize = DataTypeInfo.ElementSize(weight.DataType);
+        long[] rawIndices = ReadInt64Indices(indices);
+        for (int index = 0; index < rawIndices.Length; index++)
+        {
+            long row = rawIndices[index];
+            if (row < 0 || row >= rows)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(indices),
+                    $"Embedding index {row} is outside 0..{rows - 1}.");
+            }
+        }
+
+        Tensor output = TensorFactory.Empty(weight.DataType, outputShape);
+        for (int index = 0; index < rawIndices.Length; index++)
+        {
+            long row = rawIndices[index];
+            int sourceOffset = checked((int)(row * width * elementSize));
+            int destinationOffset = checked((int)(index * width * elementSize));
+            weight.RawBytes.Slice(sourceOffset, checked((int)(width * elementSize)))
+                .CopyTo(output.RawBytes.Slice(destinationOffset, checked((int)(width * elementSize))));
+        }
+        return output;
+    }
+
+    public Tensor Conv1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int dilation,
+        int groups,
+        bool causal)
+    {
+        ValidateConv1D(input, weight, bias, stride, padding, dilation, groups, causal);
+        long batch = input.Shape[0];
+        long inputChannels = input.Shape[1];
+        long inputLength = input.Shape[2];
+        long outputChannels = weight.Shape[0];
+        long kernelLength = weight.Shape[2];
+        long leftPadding = causal ? (kernelLength - 1) * dilation : padding;
+        long rightPadding = causal ? 0 : padding;
+        long outputLength = checked(
+            (inputLength + leftPadding + rightPadding - (dilation * (kernelLength - 1)) - 1) /
+            stride + 1);
+        long[] outputShape = [batch, outputChannels, outputLength];
+        float[] inputValues = ReadFloatingValues(input);
+        float[] weightValues = ReadFloatingValues(weight);
+        float[]? biasValues = bias is null ? null : ReadFloatingValues(bias);
+        float[] outputValues = new float[checked((int)(batch * outputChannels * outputLength))];
+        long channelsPerGroup = inputChannels / groups;
+        long outputsPerGroup = outputChannels / groups;
+
+        for (long batchIndex = 0; batchIndex < batch; batchIndex++)
+        {
+            for (long outputChannel = 0; outputChannel < outputChannels; outputChannel++)
+            {
+                long group = outputChannel / outputsPerGroup;
+                for (long outputPosition = 0; outputPosition < outputLength; outputPosition++)
+                {
+                    float sum = biasValues is null ? 0 : biasValues[checked((int)outputChannel)];
+                    for (long inputChannelOffset = 0; inputChannelOffset < channelsPerGroup; inputChannelOffset++)
+                    {
+                        long inputChannel = (group * channelsPerGroup) + inputChannelOffset;
+                        for (long kernelIndex = 0; kernelIndex < kernelLength; kernelIndex++)
+                        {
+                            long inputPosition = (outputPosition * stride) -
+                                leftPadding + (kernelIndex * dilation);
+                            if (inputPosition < 0 || inputPosition >= inputLength)
+                            {
+                                continue;
+                            }
+                            long inputOffset =
+                                (batchIndex * inputChannels * inputLength) +
+                                (inputChannel * inputLength) + inputPosition;
+                            long weightOffset =
+                                (outputChannel * channelsPerGroup * kernelLength) +
+                                (inputChannelOffset * kernelLength) + kernelIndex;
+                            sum += inputValues[checked((int)inputOffset)] *
+                                weightValues[checked((int)weightOffset)];
+                        }
+                    }
+                    long outputOffset =
+                        (batchIndex * outputChannels * outputLength) +
+                        (outputChannel * outputLength) + outputPosition;
+                    outputValues[checked((int)outputOffset)] = sum;
+                }
+            }
+        }
+        return FromFloatingValues(input.DataType, outputShape, outputValues);
+    }
+
+    public Tensor Rotary(
+        Tensor input,
+        Tensor positions,
+        int sequenceDimension,
+        int rotaryDimension,
+        double baseFrequency,
+        bool interleaved)
+    {
+        if (input.DataType is not (DataType.BFloat16 or DataType.Float32))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Unsupported,
+                $"CPU rotary does not support dtype '{input.DataType}'.");
+        }
+        if (input.Shape.Count < 2)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Rotary input must have at least two dimensions.");
+        }
+        sequenceDimension = NormalizeDimension(sequenceDimension, input.Shape.Count);
+        if (sequenceDimension == input.Shape.Count - 1)
+        {
+            throw new ArgumentException(
+                "The rotary sequence dimension cannot be the feature dimension.",
+                nameof(sequenceDimension));
+        }
+        long width = input.Shape[^1];
+        rotaryDimension = rotaryDimension == 0 ? checked((int)width) : rotaryDimension;
+        if (rotaryDimension <= 0 || rotaryDimension > width ||
+            rotaryDimension % 2 != 0 ||
+            !double.IsFinite(baseFrequency) || baseFrequency <= 0)
+        {
+            throw new ArgumentException(
+                "Rotary dimension must be positive/even and base frequency finite/positive.");
+        }
+        long sequenceLength = input.Shape[sequenceDimension];
+        ValidatePositions(positions, sequenceLength);
+
+        float[] values = ReadFloatingValues(input);
+        long[] indices = ReadInt64Indices(positions);
+        long trailingElements = Product(input.Shape.Skip(sequenceDimension + 1).ToArray());
+        long groups = input.ElementCount / (sequenceLength * trailingElements);
+        if (indices.Length != sequenceLength && groups % (indices.Length / sequenceLength) != 0)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Position rows must broadcast across rotary input groups.");
+        }
+        long positionRows = indices.Length / sequenceLength;
+        long groupsPerPositionRow = positionRows == 1 ? groups : groups / positionRows;
+        int half = rotaryDimension / 2;
+        float inverseWidth = 1.0f / rotaryDimension;
+
+        for (long group = 0; group < groups; group++)
+        {
+            long row = positionRows == 1 ? 0 : group / groupsPerPositionRow;
+            for (long sequence = 0; sequence < sequenceLength; sequence++)
+            {
+                long positionIndex = checked((int)((row * sequenceLength) + sequence));
+                long sequenceOffset =
+                    ((group * sequenceLength) + sequence) * trailingElements;
+                for (long trailing = 0; trailing < trailingElements / width; trailing++)
+                {
+                    long featureOffset = sequenceOffset + (trailing * width);
+                    ApplyRotaryVector(
+                        values,
+                        checked((int)featureOffset),
+                        checked((int)width),
+                        half,
+                        indices[checked((int)positionIndex)],
+                        baseFrequency,
+                        inverseWidth,
+                        interleaved);
+                }
+            }
+        }
+        return FromFloatingValues(input.DataType, input.Shape.ToArray(), values);
+    }
+
+    public Tensor CausalAttention(
+        Tensor query,
+        Tensor key,
+        Tensor value,
+        double? scale)
+    {
+        ValidateAttention(query, key, value, scale);
+        long batch = query.Shape[0];
+        long queryHeads = query.Shape[1];
+        long querySequence = query.Shape[2];
+        long width = query.Shape[3];
+        long keyHeads = key.Shape[1];
+        long keySequence = key.Shape[2];
+        float[] queryValues = ReadFloatingValues(query);
+        float[] keyValues = ReadFloatingValues(key);
+        float[] valueValues = ReadFloatingValues(value);
+        float[] outputValues = new float[checked((int)query.ElementCount)];
+        float scaleValue = (float)(scale ?? (1.0 / Math.Sqrt(width)));
+        if (!float.IsFinite(scaleValue) || scaleValue <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scale), "Attention scale must be finite and positive.");
+        }
+        long headsPerKey = queryHeads / keyHeads;
+
+        for (long batchIndex = 0; batchIndex < batch; batchIndex++)
+        {
+            for (long queryHead = 0; queryHead < queryHeads; queryHead++)
+            {
+                long keyHead = queryHead / headsPerKey;
+                for (long queryPosition = 0; queryPosition < querySequence; queryPosition++)
+                {
+                    long queryOffset = AttentionOffset(batchIndex, queryHead, queryPosition, queryHeads, querySequence, width);
+                    float[] probabilities = new float[checked((int)keySequence)];
+                    float maximum = float.NegativeInfinity;
+                    long causalLimit = Math.Min(keySequence, queryPosition + keySequence - querySequence + 1);
+                    for (long keyPosition = 0; keyPosition < causalLimit; keyPosition++)
+                    {
+                        long keyOffset = AttentionOffset(batchIndex, keyHead, keyPosition, keyHeads, keySequence, width);
+                        float score = 0;
+                        for (long feature = 0; feature < width; feature++)
+                        {
+                            score += queryValues[checked((int)(queryOffset + feature))] *
+                                keyValues[checked((int)(keyOffset + feature))];
+                        }
+                        score *= scaleValue;
+                        probabilities[checked((int)keyPosition)] = score;
+                        maximum = MathF.Max(maximum, score);
+                    }
+                    float denominator = 0;
+                    for (long keyPosition = 0; keyPosition < causalLimit; keyPosition++)
+                    {
+                        float probability = MathF.Exp(
+                            probabilities[checked((int)keyPosition)] - maximum);
+                        probabilities[checked((int)keyPosition)] = probability;
+                        denominator += probability;
+                    }
+                    for (long feature = 0; feature < width; feature++)
+                    {
+                        float sum = 0;
+                        for (long keyPosition = 0; keyPosition < causalLimit; keyPosition++)
+                        {
+                            long valueOffset = AttentionOffset(batchIndex, keyHead, keyPosition, keyHeads, keySequence, width);
+                            sum += (probabilities[checked((int)keyPosition)] / denominator) *
+                                valueValues[checked((int)(valueOffset + feature))];
+                        }
+                        outputValues[checked((int)(queryOffset + feature))] = sum;
+                    }
+                }
+            }
+        }
+        return FromFloatingValues(query.DataType, query.Shape.ToArray(), outputValues);
+    }
+
+    private static void ValidateConv1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int dilation,
+        int groups,
+        bool causal)
+    {
+        if (input.Shape.Count != 3 || weight.Shape.Count != 3)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Conv1D expects rank-3 input [batch, channels, length] and weights.");
+        }
+        if (input.DataType != weight.DataType ||
+            input.DataType is not (DataType.BFloat16 or DataType.Float32))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.DTypeMismatch,
+                "Conv1D input and weight must have the same floating dtype.");
+        }
+        if (stride <= 0 || padding < 0 || dilation <= 0 || groups <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(stride),
+                "Conv1D stride/dilation/groups must be positive and padding non-negative.");
+        }
+        if (causal && padding != 0)
+        {
+            throw new ArgumentException(
+                "Causal Conv1D supplies left padding and requires padding=0.",
+                nameof(padding));
+        }
+        if (input.Shape[1] % groups != 0 ||
+            weight.Shape[0] % groups != 0 ||
+            weight.Shape[1] != input.Shape[1] / groups)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Conv1D channels and groups are inconsistent.");
+        }
+        long effectiveKernel = (dilation * (weight.Shape[2] - 1)) + 1;
+        if (weight.Shape[2] == 0 ||
+            (!causal && input.Shape[2] + (2L * padding) < effectiveKernel) ||
+            (causal && input.Shape[2] == 0))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Conv1D effective kernel exceeds the padded input.");
+        }
+        if (bias is not null &&
+            (bias.DataType != input.DataType ||
+                bias.Device != input.Device ||
+                bias.Shape.Count != 1 ||
+                bias.Shape[0] != weight.Shape[0]))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Conv1D bias must match output channels, dtype, and device.");
+        }
+    }
+
+    private static void ValidatePositions(Tensor positions, long sequenceLength)
+    {
+        if (positions.Shape.Count is < 1 or > 2 ||
+            positions.Shape[^1] != sequenceLength ||
+            positions.ElementCount == 0 ||
+            positions.DataType is not (DataType.Int32 or DataType.Int64))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Rotary positions must be [sequence] or [batch, sequence] integer tensors.");
+        }
+    }
+
+    private static void ApplyRotaryVector(
+        float[] values,
+        int offset,
+        int width,
+        int half,
+        long position,
+        double baseFrequency,
+        float inverseWidth,
+        bool interleaved)
+    {
+        if (position < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(position),
+                "Rotary positions cannot be negative.");
+        }
+        for (int pair = 0; pair < half; pair++)
+        {
+            int firstIndex = interleaved ? pair * 2 : pair;
+            int secondIndex = interleaved ? firstIndex + 1 : pair + half;
+            double exponent = 2.0 * pair * inverseWidth;
+            double angle = position * Math.Pow(baseFrequency, -exponent);
+            float cosine = (float)Math.Cos(angle);
+            float sine = (float)Math.Sin(angle);
+            float first = values[offset + firstIndex];
+            float second = values[offset + secondIndex];
+            values[offset + firstIndex] = (first * cosine) - (second * sine);
+            values[offset + secondIndex] = (second * cosine) + (first * sine);
+        }
+    }
+
+    private static long AttentionOffset(
+        long batch,
+        long head,
+        long sequence,
+        long heads,
+        long sequenceLength,
+        long width) =>
+        (((batch * heads + head) * sequenceLength) + sequence) * width;
+
+    private static void ValidateAttention(
+        Tensor query,
+        Tensor key,
+        Tensor value,
+        double? scale)
+    {
+        if (query.Shape.Count != 4 || key.Shape.Count != 4 || value.Shape.Count != 4)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Causal attention tensors must have [batch, heads, sequence, width] shape.");
+        }
+        if (query.DataType is not (DataType.BFloat16 or DataType.Float32) ||
+            query.DataType != key.DataType ||
+            query.DataType != value.DataType)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.DTypeMismatch,
+                "Attention Q/K/V must have the same floating dtype.");
+        }
+        if (query.Shape[0] != key.Shape[0] ||
+            query.Shape[0] != value.Shape[0] ||
+            query.Shape[3] != key.Shape[3] ||
+            query.Shape[3] != value.Shape[3] ||
+            key.Shape[1] != value.Shape[1] ||
+            key.Shape[2] != value.Shape[2] ||
+            key.Shape[1] == 0 ||
+            query.Shape[1] == 0 ||
+            query.Shape[1] % key.Shape[1] != 0 ||
+            query.Shape[2] == 0 ||
+            key.Shape[2] == 0 ||
+            query.Shape[3] == 0 ||
+            query.Shape[2] > key.Shape[2])
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "Attention shapes or grouped-query head counts are inconsistent.");
+        }
+        if (scale is { } requestedScale &&
+            (!double.IsFinite(requestedScale) || requestedScale <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(scale),
+                "Attention scale must be finite and positive.");
+        }
+    }
+
+    private static long[] ReadInt64Indices(Tensor tensor)
+    {
+        return tensor.DataType switch
+        {
+            DataType.Int32 => tensor.AsSpan<int>().ToArray().Select(value => (long)value).ToArray(),
+            DataType.Int64 => tensor.AsSpan<long>().ToArray(),
+            _ => throw new PowerTorchException(
+                PowerTorchErrorCategory.DTypeMismatch,
+                "Integer indices must use Int32 or Int64."),
+        };
+    }
+
+    private static float[] ReadFloatingValues(Tensor tensor)
+    {
+        return tensor.DataType switch
+        {
+            DataType.BFloat16 => tensor.AsSpan<BFloat16>().ToArray()
+                .Select(value => (float)value)
+                .ToArray(),
+            DataType.Float32 => tensor.AsSpan<float>().ToArray(),
+            DataType.Float64 => tensor.AsSpan<double>().ToArray()
+                .Select(value => checked((float)value))
+                .ToArray(),
+            _ => throw Unsupported(tensor.DataType),
+        };
+    }
+
+    private static Tensor FromFloatingValues(
+        DataType dataType,
+        IReadOnlyList<long> shape,
+        float[] values)
+    {
+        return dataType switch
+        {
+            DataType.BFloat16 => TensorFactory.FromArray(
+                values.Select(value => (BFloat16)value).ToArray(),
+                shape),
+            DataType.Float32 => TensorFactory.FromArray(values, shape),
+            DataType.Float64 => TensorFactory.FromArray(
+                values.Select(value => (double)value).ToArray(),
+                shape),
+            _ => throw Unsupported(dataType),
+        };
     }
 
     private static void ApplyBFloat16(

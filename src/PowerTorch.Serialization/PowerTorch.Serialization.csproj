@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PowerTorch.Abstractions\PowerTorch.Abstractions.csproj" />
+    <ProjectReference Include="..\PowerTorch.Core\PowerTorch.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

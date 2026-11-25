@@ -72,6 +72,8 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
             ["tensor.add"] = false,
             ["host_f32.add"] = true,
             ["graph_compile"] = false,
+            ["device.transfer"] = false,
+            ["tensor_residency"] = false,
             ["autograd"] = false,
         });
 
@@ -137,6 +139,36 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
         Tensor? weight,
         double epsilon) =>
         throw Unsupported("tensor.rms_norm");
+
+    public Tensor Embedding(Tensor weight, Tensor indices) =>
+        throw Unsupported("tensor.embedding");
+
+    public Tensor Conv1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int dilation,
+        int groups,
+        bool causal) =>
+        throw Unsupported("tensor.conv1d");
+
+    public Tensor Rotary(
+        Tensor input,
+        Tensor positions,
+        int sequenceDimension,
+        int rotaryDimension,
+        double baseFrequency,
+        bool interleaved) =>
+        throw Unsupported("tensor.rotary");
+
+    public Tensor CausalAttention(
+        Tensor query,
+        Tensor key,
+        Tensor value,
+        double? scale) =>
+        throw Unsupported("tensor.causal_attention");
 
     public void Dispose()
     {

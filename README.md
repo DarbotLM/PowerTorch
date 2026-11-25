@@ -14,12 +14,13 @@ the verified foundation, not full PyTorch parity.
 
 - .NET 11 managed tensor/storage and shape/stride contracts.
 - CPU float/bfloat16 tensor arithmetic plus reshape, permute/transpose, slice,
-  batched matmul, softmax, layer norm, RMS norm, sum, and mean.
+  batched matmul, softmax, layer/RMS norm, embedding, grouped/causal Conv1D,
+  rotary embeddings, and causal grouped-query attention.
 - Reverse-mode autograd and one-step AdamW for float32/float64.
 - Native C++/DirectML device creation, synchronization, and float32
   element-wise add over a D3D12/DirectML compiled operator.
 - Safe safetensors metadata parsing and bounded real tensor reads, including
-  BF16 checkpoint tensors.
+  BF16 and indexed sharded checkpoint placement into bounded CPU tensors.
 - ONNX Runtime DirectML model loading in an isolated native .NET process.
 - Binary PowerShell module with device, tensor, checkpoint, ONNX, backward,
   optimizer, and health cmdlets.
@@ -30,8 +31,8 @@ the verified foundation, not full PyTorch parity.
 The latest local verification records:
 
 - Release/Debug build: 0 warnings, 0 errors.
-- 8 asset-independent xUnit tests and the new synthetic Pester CPU operation
-  test passed in the current environment.
+- 10 synthetic xUnit checks and 2 synthetic Pester CPU operation checks passed
+  in the current environment.
 - DirectML health verified on NVIDIA T1000 8GB.
 - Native DirectML add matched CPU on real Florence tensor data.
 - Florence safetensors: 665 tensors, 926,065,664 data bytes.
@@ -90,6 +91,12 @@ environment. ONNX Runtime DirectML is hosted through a native .NET CLI
 process because in-process ONNX initialization can terminate the PowerShell
 host on some Windows runtime combinations. CPU tensor/autograd/optimizer
 operations remain in-process.
+
+Device transfer and tensor residency are intentionally not exposed yet:
+`Tensor` currently owns bounded managed CPU bytes, while the DirectML bridge
+accepts host copies and has no persistent device tensor object, ownership model,
+or safe transfer lifecycle. A partial transfer command would therefore claim
+residency that the runtime cannot guarantee.
 
 PyTorch may be used only as an isolated development parity oracle. It is not a
 PowerTorch runtime dependency.

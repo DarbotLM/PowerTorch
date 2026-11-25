@@ -42,6 +42,44 @@ Describe 'PowerTorch binary module' {
         $permuted.Dispose()
     }
 
+    It 'executes embedding convolution rotary and causal attention CPU operations' {
+        $weights = New-PowerTorchTensor -Float32 1, 2, 3, 4 -Shape 2, 2
+        $indices = New-PowerTorchTensor -Int64 1, 0 -Shape 2
+        $embedding = Invoke-PowerTorchOperation `
+            -Operation Embedding -Left $weights -Right $indices
+        $positions = New-PowerTorchTensor -Int64 0, 1 -Shape 2
+        $rotary = Invoke-PowerTorchOperation `
+            -Operation Rotary -Left $embedding -Positions $positions
+
+        $input = New-PowerTorchTensor -Float32 1, 2, 3, 4 -Shape 1, 1, 4
+        $kernel = New-PowerTorchTensor -Float32 1, 1 -Shape 1, 1, 2
+        $conv = Invoke-PowerTorchOperation `
+            -Operation Conv1D -Left $input -Right $kernel -Causal
+
+        $query = New-PowerTorchTensor -Float32 0, 0, 0, 0 -Shape 1, 2, 1, 2
+        $key = New-PowerTorchTensor -Float32 0, 0 -Shape 1, 1, 1, 2
+        $value = New-PowerTorchTensor -Float32 2, 4 -Shape 1, 1, 1, 2
+        $attention = Invoke-PowerTorchOperation `
+            -Operation CausalAttention -Left $query -Right $key -Value $value
+
+        (Get-PowerTorchTensor -Tensor $embedding).Shape | Should -Be @(2, 2)
+        (Get-PowerTorchTensor -Tensor $conv).Shape | Should -Be @(1, 1, 4)
+        (Get-PowerTorchTensor -Tensor $rotary).Shape | Should -Be @(2, 2)
+        (Get-PowerTorchTensor -Tensor $attention).Shape | Should -Be @(1, 2, 1, 2)
+        $weights.Dispose()
+        $indices.Dispose()
+        $embedding.Dispose()
+        $positions.Dispose()
+        $rotary.Dispose()
+        $input.Dispose()
+        $kernel.Dispose()
+        $conv.Dispose()
+        $query.Dispose()
+        $key.Dispose()
+        $value.Dispose()
+        $attention.Dispose()
+    }
+
     It 'parses the real Florence safetensors checkpoint' {
         $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
             'OmniParser\weights\florence31_icon_caption\model.safetensors'

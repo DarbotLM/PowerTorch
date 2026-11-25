@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using PowerTorch.Core;
 
 namespace PowerTorch.Serialization;
 
@@ -241,4 +242,244 @@ public sealed class SafetensorsFile : IDisposable
         PowerTorchErrorCategory.Serialization,
         message,
         innerException);
+}
+
+public sealed class ShardedSafetensorsCheckpoint : IDisposable
+{
+    private const int MaximumIndexBytes = 16 * 1024 * 1024;
+    private readonly Dictionary<string, string> _shardsByTensor;
+    private readonly Dictionary<string, SafetensorsFile> _shards =
+        new(StringComparer.Ordinal);
+    private bool _disposed;
+
+    public ShardedSafetensorsCheckpoint(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("A checkpoint index path is required.", nameof(path));
+        }
+
+        IndexPath = Path.GetFullPath(path);
+        var indexInfo = new FileInfo(IndexPath);
+        if (!indexInfo.Exists ||
+            indexInfo.Length > MaximumIndexBytes ||
+            (indexInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw CheckpointError(
+                $"Checkpoint index must exist and be at most {MaximumIndexBytes} bytes.");
+        }
+
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(IndexPath);
+            using var document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("weight_map", out var mapElement) ||
+                mapElement.ValueKind != JsonValueKind.Object)
+            {
+                throw CheckpointError(
+                    "Checkpoint index must be an object containing a weight_map.");
+            }
+
+            string root = Path.GetDirectoryName(IndexPath) ??
+                throw CheckpointError("The checkpoint index has no containing directory.");
+            var assignments = new Dictionary<string, string>(StringComparer.Ordinal);
+            var shardPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in mapElement.EnumerateObject())
+            {
+                string? shardName = property.Value.ValueKind == JsonValueKind.String
+                    ? property.Value.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(property.Name) ||
+                    string.IsNullOrWhiteSpace(shardName) ||
+                    Path.IsPathRooted(shardName))
+                {
+                    throw CheckpointError(
+                        "Every weight_map entry must have a tensor name and relative shard path.");
+                }
+
+                string shardPath = Path.GetFullPath(Path.Combine(root, shardName));
+                string relative = Path.GetRelativePath(root, shardPath);
+                if (relative == ".." ||
+                    relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                    relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+                {
+                    throw CheckpointError(
+                        $"Shard path '{shardName}' escapes the checkpoint directory.");
+                }
+                assignments.Add(property.Name, shardPath);
+                shardPaths.Add(shardPath);
+            }
+            if (assignments.Count == 0)
+            {
+                throw CheckpointError("Checkpoint weight_map is empty.");
+            }
+
+            _shardsByTensor = assignments;
+            foreach (string shardPath in shardPaths)
+            {
+                var shardInfo = new FileInfo(shardPath);
+                if (!shardInfo.Exists ||
+                    (shardInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw CheckpointError(
+                        $"Checkpoint shard '{shardPath}' is missing or is a reparse point.");
+                }
+                _shards.Add(shardPath, new SafetensorsFile(shardPath));
+            }
+
+            foreach ((string tensorName, string shardPath) in assignments)
+            {
+                if (!_shards[shardPath].Tensors.ContainsKey(tensorName))
+                {
+                    throw CheckpointError(
+                        $"Indexed tensor '{tensorName}' was not found in shard '{shardPath}'.");
+                }
+            }
+            MetadataJson = document.RootElement.TryGetProperty("metadata", out var metadata)
+                ? metadata.GetRawText()
+                : null;
+        }
+        catch (PowerTorchException)
+        {
+            Dispose();
+            throw;
+        }
+        catch (JsonException exception)
+        {
+            Dispose();
+            throw CheckpointError("The checkpoint index is not valid JSON.", exception);
+        }
+        catch (IOException exception)
+        {
+            Dispose();
+            throw CheckpointError("The checkpoint index could not be read.", exception);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            Dispose();
+            throw CheckpointError("The checkpoint index could not be accessed.", exception);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
+        {
+            Dispose();
+            throw CheckpointError("The checkpoint index contains invalid entries.", exception);
+        }
+    }
+
+    public string IndexPath { get; }
+
+    public string? MetadataJson { get; }
+
+    public IReadOnlyList<string> TensorNames =>
+        _shardsByTensor.Keys.Order(StringComparer.Ordinal).ToArray();
+
+    public IReadOnlyList<string> ShardPaths =>
+        _shards.Keys.Order(StringComparer.Ordinal).ToArray();
+
+    public SafeTensorDescriptor GetTensor(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("A tensor name is required.", nameof(name));
+        }
+        if (!_shardsByTensor.TryGetValue(name, out string? shardPath))
+        {
+            throw new KeyNotFoundException(
+                $"Tensor '{name}' was not found in checkpoint index '{IndexPath}'.");
+        }
+        return _shards[shardPath].GetTensor(name);
+    }
+
+    public async ValueTask<Tensor> LoadTensorAsync(
+        string name,
+        long maximumBytes = 1_000_000_000,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("A tensor name is required.", nameof(name));
+        }
+        if (!_shardsByTensor.TryGetValue(name, out string? shardPath))
+        {
+            throw new KeyNotFoundException(
+                $"Tensor '{name}' was not found in checkpoint index '{IndexPath}'.");
+        }
+        SafeTensorDescriptor descriptor = _shards[shardPath].GetTensor(name);
+        if (descriptor.ByteLength > maximumBytes || maximumBytes <= 0)
+        {
+            throw CheckpointError(
+                $"Tensor '{name}' is {descriptor.ByteLength} bytes, exceeding the {maximumBytes}-byte limit.");
+        }
+        byte[] bytes = await _shards[shardPath]
+            .ReadTensorBytesAsync(name, cancellationToken);
+        return TensorFactory.FromRawBytes(descriptor.DataType, descriptor.Shape, bytes);
+    }
+
+    public async ValueTask<IReadOnlyDictionary<string, Tensor>> LoadStateAsync(
+        IEnumerable<string> names,
+        long maximumTotalBytes = 1_000_000_000,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        string[] requested = names.Distinct(StringComparer.Ordinal).ToArray();
+        long totalBytes = 0;
+        foreach (string name in requested)
+        {
+            totalBytes = checked(totalBytes + GetTensor(name).ByteLength);
+            if (totalBytes > maximumTotalBytes || maximumTotalBytes <= 0)
+            {
+                throw CheckpointError(
+                    $"Requested state exceeds the {maximumTotalBytes}-byte aggregate limit.");
+            }
+        }
+
+        var state = new Dictionary<string, Tensor>(requested.Length, StringComparer.Ordinal);
+        try
+        {
+            foreach (string name in requested)
+            {
+                state.Add(
+                    name,
+                    await LoadTensorAsync(
+                        name,
+                        maximumTotalBytes,
+                        cancellationToken));
+            }
+            return state;
+        }
+        catch
+        {
+            foreach (Tensor tensor in state.Values)
+            {
+                tensor.Dispose();
+            }
+            throw;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+        foreach (SafetensorsFile shard in _shards.Values)
+        {
+            shard.Dispose();
+        }
+    }
+
+    private static PowerTorchException CheckpointError(
+        string message,
+        Exception? innerException = null) =>
+        new(
+            PowerTorchErrorCategory.Serialization,
+            message,
+            innerException);
 }

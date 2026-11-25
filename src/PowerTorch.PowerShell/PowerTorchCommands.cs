@@ -135,7 +135,7 @@ public sealed class TestPowerTorchCommand : PSCmdlet
 }
 
 [Cmdlet(VerbsCommon.Get, "PowerTorchCheckpoint")]
-[OutputType(typeof(SafeTensorMetadata))]
+[OutputType(typeof(SafeTensorMetadata), typeof(ShardedTensorMetadata))]
 public sealed class GetPowerTorchCheckpointCommand : PSCmdlet
 {
     [Parameter(Mandatory = true, Position = 0)]
@@ -147,6 +147,25 @@ public sealed class GetPowerTorchCheckpointCommand : PSCmdlet
         string resolvedPath = GetUnresolvedProviderPathFromPSPath(Path);
         try
         {
+            if (IsCheckpointIndex(resolvedPath))
+            {
+                using var shardedCheckpoint = new ShardedSafetensorsCheckpoint(resolvedPath);
+                SafeTensorDescriptor[] tensors = shardedCheckpoint.TensorNames
+                    .Select(shardedCheckpoint.GetTensor)
+                    .ToArray();
+                WriteObject(new ShardedTensorMetadata(
+                    resolvedPath,
+                    shardedCheckpoint.ShardPaths.Count,
+                    tensors.Length,
+                    tensors.Sum(tensor => tensor.ByteLength),
+                    tensors
+                        .Select(tensor => tensor.SourceDataType)
+                        .Distinct(StringComparer.Ordinal)
+                        .OrderBy(dtype => dtype, StringComparer.Ordinal)
+                        .ToArray(),
+                    shardedCheckpoint.MetadataJson));
+                return;
+            }
             using var checkpoint = new SafetensorsFile(resolvedPath);
             WriteObject(new SafeTensorMetadata(
                 resolvedPath,
@@ -169,6 +188,9 @@ public sealed class GetPowerTorchCheckpointCommand : PSCmdlet
                 resolvedPath));
         }
     }
+
+    internal static bool IsCheckpointIndex(string path) =>
+        path.EndsWith(".index.json", StringComparison.OrdinalIgnoreCase);
 }
 
 [Cmdlet(
@@ -252,6 +274,36 @@ public sealed class ReadPowerTorchCheckpointTensorCommand : PSCmdlet
     protected override void ProcessRecord()
     {
         string resolvedPath = GetUnresolvedProviderPathFromPSPath(Path);
+        if (GetPowerTorchCheckpointCommand.IsCheckpointIndex(resolvedPath))
+        {
+            using var shardedCheckpoint = new ShardedSafetensorsCheckpoint(resolvedPath);
+            SafeTensorDescriptor selectedDescriptor;
+            if (TensorName is not null)
+            {
+                selectedDescriptor = shardedCheckpoint.GetTensor(TensorName);
+            }
+            else
+            {
+                selectedDescriptor = shardedCheckpoint.TensorNames
+                    .Select(shardedCheckpoint.GetTensor)
+                    .Where(candidate =>
+                        candidate.DataType is DataType.Float32 or DataType.BFloat16 &&
+                        candidate.ByteLength <= MaximumBytes)
+                    .OrderBy(candidate => candidate.ByteLength)
+                    .FirstOrDefault()
+                    ?? throw new PowerTorchException(
+                        PowerTorchErrorCategory.Serialization,
+                        $"No float32 or bfloat16 tensor of at most {MaximumBytes} bytes exists in '{resolvedPath}'.");
+            }
+
+            WriteObject(shardedCheckpoint.LoadTensorAsync(
+                    selectedDescriptor.Name,
+                    MaximumBytes)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult());
+            return;
+        }
         using var checkpoint = new SafetensorsFile(resolvedPath);
         SafeTensorDescriptor descriptor;
         if (TensorName is not null)
@@ -389,7 +441,11 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
         "Matmul",
         "Softmax",
         "LayerNorm",
-        "RmsNorm")]
+        "RmsNorm",
+        "Embedding",
+        "Conv1D",
+        "Rotary",
+        "CausalAttention")]
     public string Operation { get; set; } = string.Empty;
 
     [Parameter(Mandatory = true)]
@@ -429,6 +485,47 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
 
     [Parameter]
     public double Epsilon { get; set; } = 1e-5;
+
+    [Parameter]
+    public Tensor? Positions { get; set; }
+
+    [Parameter]
+    public Tensor? Value { get; set; }
+
+    [Parameter]
+    [ValidateRange(1, int.MaxValue)]
+    public int Stride { get; set; } = 1;
+
+    [Parameter]
+    [ValidateRange(0, int.MaxValue)]
+    public int Padding { get; set; }
+
+    [Parameter]
+    [ValidateRange(1, int.MaxValue)]
+    public int Dilation { get; set; } = 1;
+
+    [Parameter]
+    [ValidateRange(1, int.MaxValue)]
+    public int Groups { get; set; } = 1;
+
+    [Parameter]
+    public SwitchParameter Causal { get; set; }
+
+    [Parameter]
+    public int SequenceDimension { get; set; } = -2;
+
+    [Parameter]
+    [ValidateRange(0, int.MaxValue)]
+    public int RotaryDimension { get; set; }
+
+    [Parameter]
+    public double BaseFrequency { get; set; } = 10_000;
+
+    [Parameter]
+    public SwitchParameter Interleaved { get; set; }
+
+    [Parameter]
+    public double? Scale { get; set; }
 
     [Parameter]
     [ValidateSet("Cpu", "DirectML")]
@@ -485,6 +582,28 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
             "Softmax" => runtime.Softmax(Left, Dimension),
             "LayerNorm" => runtime.LayerNorm(Left, RequireShape(), Weight, Bias, Epsilon),
             "RmsNorm" => runtime.RmsNorm(Left, RequireShape(), Weight, Epsilon),
+            "Embedding" => runtime.Embedding(Left, RequireRight()),
+            "Conv1D" => runtime.Conv1D(
+                Left,
+                RequireRight(),
+                Bias,
+                Stride,
+                Padding,
+                Dilation,
+                Groups,
+                Causal.IsPresent),
+            "Rotary" => runtime.Rotary(
+                Left,
+                RequirePositions(),
+                SequenceDimension,
+                RotaryDimension,
+                BaseFrequency,
+                Interleaved.IsPresent),
+            "CausalAttention" => runtime.CausalAttention(
+                Left,
+                RequireRight(),
+                RequireValue(),
+                Scale),
             _ => throw new InvalidOperationException($"Unknown operation '{Operation}'."),
         };
         WriteObject(result);
@@ -516,6 +635,12 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
         }
         return Permutation;
     }
+
+    private Tensor RequirePositions() =>
+        Positions ?? throw new ArgumentException("Operation 'Rotary' requires -Positions.");
+
+    private Tensor RequireValue() =>
+        Value ?? throw new ArgumentException("Operation 'CausalAttention' requires -Value.");
 
     private static int NormalizeDimension(int dimension, int rank)
     {
@@ -667,6 +792,14 @@ public sealed record SafeTensorMetadata(
     long HeaderBytes,
     long DataBytes,
     int TensorCount,
+    IReadOnlyList<string> DTypes,
+    string? MetadataJson);
+
+public sealed record ShardedTensorMetadata(
+    string Path,
+    int ShardCount,
+    int TensorCount,
+    long DataBytes,
     IReadOnlyList<string> DTypes,
     string? MetadataJson);
 

@@ -53,6 +53,16 @@
           "backends": ["cpu"]
         },
         {
+          "name": "CPU embedding, grouped Conv1D, rotary, and causal GQA attention",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "device transfer and persistent tensor residency",
+          "status": "planned",
+          "backends": ["directml", "cuda"]
+        },
+        {
           "name": "DirectML float32 host-buffer add",
           "status": "supported",
           "backends": ["directml"]
@@ -89,7 +99,12 @@
       "capabilities": [
         {
           "name": "safetensors",
-          "status": "partial",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "indexed sharded safetensors CPU state load",
+          "status": "supported",
           "backends": ["cpu"]
         },
         {

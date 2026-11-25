@@ -84,6 +84,78 @@ public sealed class PowerTorchRuntime
         return Resolve(input).RmsNorm(input, normalizedShape, weight, epsilon);
     }
 
+    public Tensor Embedding(Tensor weight, Tensor indices)
+    {
+        ResolveEmbedding(weight, indices);
+        return Resolve(weight).Embedding(weight, indices);
+    }
+
+    public Tensor Conv1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias = null,
+        int stride = 1,
+        int padding = 0,
+        int dilation = 1,
+        int groups = 1,
+        bool causal = false)
+    {
+        ResolveCompatible(input, weight);
+        if (bias is not null)
+        {
+            ResolveOptionalParameters(input, bias);
+        }
+        return Resolve(input).Conv1D(
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            causal);
+    }
+
+    public Tensor Rotary(
+        Tensor input,
+        Tensor positions,
+        int sequenceDimension = -2,
+        int rotaryDimension = 0,
+        double baseFrequency = 10_000,
+        bool interleaved = false)
+    {
+        if (input.Device != positions.Device)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Backend,
+                "Rotary input and position tensors must use the same device.");
+        }
+        if (positions.DataType is not (DataType.Int32 or DataType.Int64))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.DTypeMismatch,
+                "Rotary positions must use Int32 or Int64.");
+        }
+        return Resolve(input).Rotary(
+            input,
+            positions,
+            sequenceDimension,
+            rotaryDimension,
+            baseFrequency,
+            interleaved);
+    }
+
+    public Tensor CausalAttention(
+        Tensor query,
+        Tensor key,
+        Tensor value,
+        double? scale = null)
+    {
+        ResolveCompatible(query, key);
+        ResolveCompatible(query, value);
+        return Resolve(query).CausalAttention(query, key, value, scale);
+    }
+
     private ITensorBackend Resolve(Tensor left, Tensor right)
     {
         if (left.Device != right.Device)
@@ -138,6 +210,22 @@ public sealed class PowerTorchRuntime
                     PowerTorchErrorCategory.DTypeMismatch,
                     "Normalization parameters must match the input device and dtype.");
             }
+        }
+    }
+
+    private static void ResolveEmbedding(Tensor weight, Tensor indices)
+    {
+        if (weight.Device != indices.Device)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Backend,
+                "Embedding weights and indices must use the same device.");
+        }
+        if (indices.DataType is not (DataType.Int32 or DataType.Int64))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.DTypeMismatch,
+                "Embedding indices must use Int32 or Int64.");
         }
     }
 

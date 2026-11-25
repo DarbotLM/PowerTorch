@@ -44,4 +44,30 @@ public interface ITensorBackend
         IReadOnlyList<long> normalizedShape,
         Tensor? weight,
         double epsilon);
+
+    Tensor Embedding(Tensor weight, Tensor indices);
+
+    Tensor Conv1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int dilation,
+        int groups,
+        bool causal);
+
+    Tensor Rotary(
+        Tensor input,
+        Tensor positions,
+        int sequenceDimension,
+        int rotaryDimension,
+        double baseFrequency,
+        bool interleaved);
+
+    Tensor CausalAttention(
+        Tensor query,
+        Tensor key,
+        Tensor value,
+        double? scale);
 }
