@@ -31,7 +31,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet restore failed with exit code $LASTEXITCODE."
 }
 & dotnet build (Join-Path $projectRoot 'PowerTorch.slnx') `
-    --configuration $Configuration --no-restore
+    --configuration $Configuration --no-restore `
+    --property:PowerShellHome=$PSHOME
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet build failed with exit code $LASTEXITCODE."
 }

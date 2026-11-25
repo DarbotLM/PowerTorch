@@ -19,10 +19,16 @@
 
   <ItemGroup>
     <Reference Include="System.Management.Automation">
-      <HintPath>C:\Program Files\PowerShell\7\System.Management.Automation.dll</HintPath>
+      <HintPath>$(PowerShellHome)\System.Management.Automation.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <Target Name="RequirePowerShellHome" BeforeTargets="ResolveReferences">
+    <Error
+      Condition="'$(PowerShellHome)' == '' or !Exists('$(PowerShellHome)\System.Management.Automation.dll')"
+      Text="Set /p:PowerShellHome to a PowerShell 7 installation containing System.Management.Automation.dll." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AI.DirectML" Version="1.15.4" GeneratePathProperty="true" />
