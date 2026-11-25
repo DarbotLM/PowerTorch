@@ -105,6 +105,8 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
 
     public Tensor Sigmoid(Tensor input) => throw Unsupported("tensor.sigmoid");
 
+    public Tensor Gelu(Tensor input) => throw Unsupported("tensor.gelu");
+
     public Tensor Sum(Tensor input) => throw Unsupported("tensor.sum");
 
     public Tensor Mean(Tensor input) => throw Unsupported("tensor.mean");

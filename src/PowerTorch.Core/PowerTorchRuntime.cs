@@ -221,6 +221,8 @@ public sealed class PowerTorchRuntime
 
     public Tensor Sin(Tensor input) => Resolve(input).Sin(input);
 
+    public Tensor Gelu(Tensor input) => Resolve(input).Gelu(input);
+
     public Tensor Cos(Tensor input) => Resolve(input).Cos(input);
 
     public Tensor Transfer(Tensor input, Device target) =>

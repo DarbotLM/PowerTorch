@@ -25,6 +25,7 @@ public sealed class CpuBackend : ITensorBackend
             ["tensor.subtract"] = true,
             ["tensor.divide"] = true,
             ["tensor.sigmoid"] = true,
+            ["tensor.gelu"] = true,
             ["tensor.sum"] = true,
             ["tensor.mean"] = true,
             ["tensor.reshape"] = true,
@@ -194,6 +195,45 @@ public sealed class CpuBackend : ITensorBackend
     }
 
     public Tensor Sum(Tensor input) => Reduce(input, average: false);
+
+    public Tensor Gelu(Tensor input)
+    {
+        if (input.DataType is not (DataType.BFloat16 or DataType.Float32 or DataType.Float64))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.Unsupported,
+                $"CPU GELU requires a floating dtype; received '{input.DataType}'.");
+        }
+        Tensor output = TensorFactory.Empty(input.DataType, input.Shape.ToArray());
+        if (input.DataType == DataType.BFloat16)
+        {
+            ReadOnlySpan<BFloat16> source = input.AsSpan<BFloat16>();
+            Span<BFloat16> destination = output.AsSpan<BFloat16>();
+            for (int index = 0; index < source.Length; index++)
+            {
+                destination[index] = (BFloat16)GeluCore(source[index]);
+            }
+        }
+        else if (input.DataType == DataType.Float32)
+        {
+            ReadOnlySpan<float> source = input.AsSpan<float>();
+            Span<float> destination = output.AsSpan<float>();
+            for (int index = 0; index < source.Length; index++)
+            {
+                destination[index] = (float)GeluCore(source[index]);
+            }
+        }
+        else
+        {
+            ReadOnlySpan<double> source = input.AsSpan<double>();
+            Span<double> destination = output.AsSpan<double>();
+            for (int index = 0; index < source.Length; index++)
+            {
+                destination[index] = GeluCore(source[index]);
+            }
+        }
+        return output;
+    }
 
     public Tensor Mean(Tensor input) => Reduce(input, average: true);
 
@@ -1857,6 +1897,7 @@ public sealed class CpuBackend : ITensorBackend
                 {
                     sum += value;
                 }
+
                 output.AsSpan<BFloat16>()[0] =
                     (BFloat16)(average ? sum / input.ElementCount : sum);
                 break;
@@ -1907,6 +1948,20 @@ public sealed class CpuBackend : ITensorBackend
             sum /= T.CreateChecked(input.Length);
         }
         return sum;
+    }
+
+    private static double GeluCore(double value)
+    {
+        double magnitude = Math.Abs(value / Math.Sqrt(2.0));
+        double t = 1.0 / (1.0 + (0.3275911 * magnitude));
+        double polynomial =
+            (((((1.061405429 * t) - 1.453152027) * t) + 1.421413741) * t -
+                0.284496736) * t +
+            0.254829592;
+        double erf = value < 0
+            ? -(1.0 - (polynomial * t * Math.Exp(-magnitude * magnitude)))
+            : 1.0 - (polynomial * t * Math.Exp(-magnitude * magnitude));
+        return 0.5 * value * (1.0 + erf);
     }
 
     private sealed record MatmulPlan(

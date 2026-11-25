@@ -27,6 +27,7 @@ public sealed class TensorContractTests
         Assert.True(capabilities.Features["tensor.embedding"]);
         Assert.True(capabilities.Features["tensor.conv1d"]);
         Assert.True(capabilities.Features["tensor.conv_transpose1d"]);
+        Assert.True(capabilities.Features["tensor.gelu"]);
         Assert.True(capabilities.Features["tensor.rotary"]);
         Assert.True(capabilities.Features["tensor.causal_attention"]);
         Assert.True(capabilities.Features["tensor.concat"]);
@@ -210,6 +211,17 @@ public sealed class TensorContractTests
         Assert.Equal(
             [1.0f, 2.0f, 2.0f, 4.0f, 3.0f, 6.0f],
             result.AsSpan<float>().ToArray());
+    }
+
+    [Fact]
+    public void CpuGeluIsNumericallyCorrect()
+    {
+        using var input = TensorFactory.FromArray([-2.0f, 0.0f, 2.0f], [3]);
+        using var result = new CpuBackend().Gelu(input);
+
+        Assert.Equal(-0.045500f, result.AsSpan<float>()[0], precision: 4);
+        Assert.Equal(0.0f, result.AsSpan<float>()[1], precision: 5);
+        Assert.Equal(1.954500f, result.AsSpan<float>()[2], precision: 4);
     }
 
     [Fact]

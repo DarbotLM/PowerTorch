@@ -16,6 +16,8 @@ public interface ITensorBackend
 
     Tensor Sigmoid(Tensor input);
 
+    Tensor Gelu(Tensor input);
+
     Tensor Sum(Tensor input);
 
     Tensor Mean(Tensor input);
