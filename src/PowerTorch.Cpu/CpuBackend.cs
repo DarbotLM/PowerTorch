@@ -39,6 +39,7 @@ public sealed class CpuBackend : ITensorBackend
             ["tensor.rotary"] = true,
             ["tensor.causal_attention"] = true,
             ["tensor.conv1d"] = true,
+            ["tensor.conv_transpose1d"] = true,
             ["tensor.concat"] = true,
             ["tensor.kv_cache_append"] = true,
             ["tensor.arg_max"] = true,
@@ -453,6 +454,99 @@ public sealed class CpuBackend : ITensorBackend
                         (batchIndex * outputChannels * outputLength) +
                         (outputChannel * outputLength) + outputPosition;
                     outputValues[checked((int)outputOffset)] = sum;
+                }
+            }
+        }
+        return FromFloatingValues(input.DataType, outputShape, outputValues);
+    }
+
+    public Tensor ConvTranspose1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int outputPadding,
+        int dilation,
+        int groups)
+    {
+        ValidateConvTranspose1D(
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            outputPadding,
+            dilation,
+            groups);
+        long batch = input.Shape[0];
+        long inputChannels = input.Shape[1];
+        long inputLength = input.Shape[2];
+        long outputChannels = weight.Shape[1] * groups;
+        long kernelLength = weight.Shape[2];
+        long outputLength = checked(
+            ((inputLength - 1) * stride) -
+            (2L * padding) +
+            dilation * (kernelLength - 1) +
+            outputPadding + 1);
+        long[] outputShape = [batch, outputChannels, outputLength];
+        float[] inputValues = ReadFloatingValues(input);
+        float[] weightValues = ReadFloatingValues(weight);
+        float[]? biasValues = bias is null ? null : ReadFloatingValues(bias);
+        var outputValues = new float[checked((int)(batch * outputChannels * outputLength))];
+        long inputsPerGroup = inputChannels / groups;
+        long outputsPerGroup = outputChannels / groups;
+        for (long batchIndex = 0; batchIndex < batch; batchIndex++)
+        {
+            for (long inputChannel = 0; inputChannel < inputChannels; inputChannel++)
+            {
+                long group = inputChannel / inputsPerGroup;
+                for (long inputPosition = 0; inputPosition < inputLength; inputPosition++)
+                {
+                    float inputValue = inputValues[checked(
+                        (int)(((batchIndex * inputChannels * inputLength) +
+                            (inputChannel * inputLength) + inputPosition)))];
+                    for (long outputChannelOffset = 0;
+                         outputChannelOffset < outputsPerGroup;
+                         outputChannelOffset++)
+                    {
+                        long outputChannel = (group * outputsPerGroup) + outputChannelOffset;
+                        for (long kernelIndex = 0; kernelIndex < kernelLength; kernelIndex++)
+                        {
+                            long outputPosition =
+                                (inputPosition * stride) -
+                                padding +
+                                (kernelIndex * dilation);
+                            if (outputPosition < 0 || outputPosition >= outputLength)
+                            {
+                                continue;
+                            }
+                            long weightOffset =
+                                (inputChannel * outputsPerGroup * kernelLength) +
+                                (outputChannelOffset * kernelLength) +
+                                kernelIndex;
+                            long outputOffset =
+                                (batchIndex * outputChannels * outputLength) +
+                                (outputChannel * outputLength) +
+                                outputPosition;
+                            outputValues[checked((int)outputOffset)] +=
+                                inputValue * weightValues[checked((int)weightOffset)];
+                        }
+                    }
+                }
+            }
+            if (biasValues is not null)
+            {
+                for (long outputChannel = 0; outputChannel < outputChannels; outputChannel++)
+                {
+                    long offset =
+                        (batchIndex * outputChannels * outputLength) +
+                        (outputChannel * outputLength);
+                    for (long position = 0; position < outputLength; position++)
+                    {
+                        outputValues[checked((int)(offset + position))] +=
+                            biasValues[checked((int)outputChannel)];
+                    }
                 }
             }
         }
@@ -938,6 +1032,54 @@ public sealed class CpuBackend : ITensorBackend
             throw new PowerTorchException(
                 PowerTorchErrorCategory.ShapeMismatch,
                 "Conv1D bias must match output channels, dtype, and device.");
+        }
+    }
+
+    private static void ValidateConvTranspose1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int outputPadding,
+        int dilation,
+        int groups)
+    {
+        if (input.Shape.Count != 3 || weight.Shape.Count != 3)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "ConvTranspose1D expects rank-3 input and weight.");
+        }
+        if (input.DataType != weight.DataType ||
+            input.DataType is not (DataType.BFloat16 or DataType.Float32) ||
+            stride <= 0 ||
+            padding < 0 ||
+            outputPadding < 0 ||
+            dilation <= 0 ||
+            groups <= 0)
+        {
+            throw new ArgumentException(
+                "ConvTranspose1D requires matching floating tensors and valid stride/padding/dilation/groups.");
+        }
+        if (input.Shape[1] % groups != 0 ||
+            weight.Shape[0] != input.Shape[1] ||
+            outputPadding >= stride ||
+            weight.Shape[2] == 0)
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "ConvTranspose1D channels or output padding are inconsistent.");
+        }
+        if (bias is not null &&
+            (bias.DataType != input.DataType ||
+                bias.Device != input.Device ||
+                bias.Shape.Count != 1 ||
+                bias.Shape[0] != weight.Shape[1] * groups))
+        {
+            throw new PowerTorchException(
+                PowerTorchErrorCategory.ShapeMismatch,
+                "ConvTranspose1D bias must match output channels, dtype, and device.");
         }
     }
 

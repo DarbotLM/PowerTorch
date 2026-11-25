@@ -171,6 +171,25 @@ public sealed class PowerTorchRuntime
         return backend.Concat(inputs, dimension);
     }
 
+    public Tensor ConvTranspose1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias = null,
+        int stride = 1,
+        int padding = 0,
+        int outputPadding = 0,
+        int dilation = 1,
+        int groups = 1) =>
+        ResolveCompatible(input, weight).ConvTranspose1D(
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            outputPadding,
+            dilation,
+            groups);
+
     public Tensor KvCacheAppend(Tensor cache, Tensor update) =>
         ResolveCompatible(cache, update).KvCacheAppend(cache, update);
 

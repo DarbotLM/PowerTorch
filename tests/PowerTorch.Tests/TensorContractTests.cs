@@ -26,6 +26,7 @@ public sealed class TensorContractTests
         Assert.True(capabilities.Features["tensor.rms_norm"]);
         Assert.True(capabilities.Features["tensor.embedding"]);
         Assert.True(capabilities.Features["tensor.conv1d"]);
+        Assert.True(capabilities.Features["tensor.conv_transpose1d"]);
         Assert.True(capabilities.Features["tensor.rotary"]);
         Assert.True(capabilities.Features["tensor.causal_attention"]);
         Assert.True(capabilities.Features["tensor.concat"]);
@@ -195,6 +196,20 @@ public sealed class TensorContractTests
         Assert.Equal(
             [1.0f, 3.0f, 5.0f, 4.0f, 13.0f, 16.0f],
             output.AsSpan<float>().ToArray());
+    }
+
+    [Fact]
+    public void CpuConvTranspose1DIsCorrect()
+    {
+        var runtime = CreateRuntime();
+        using var input = TensorFactory.FromArray([1.0f, 2.0f, 3.0f], [1, 1, 3]);
+        using var weight = TensorFactory.FromArray([1.0f, 2.0f], [1, 1, 2]);
+        using var result = runtime.ConvTranspose1D(input, weight, stride: 2);
+
+        Assert.Equal(new long[] { 1, 1, 6 }, result.Shape);
+        Assert.Equal(
+            [1.0f, 2.0f, 2.0f, 4.0f, 3.0f, 6.0f],
+            result.AsSpan<float>().ToArray());
     }
 
     [Fact]

@@ -57,6 +57,16 @@ public interface ITensorBackend
         int groups,
         bool causal);
 
+    Tensor ConvTranspose1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int outputPadding,
+        int dilation,
+        int groups);
+
     Tensor Rotary(
         Tensor input,
         Tensor positions,

@@ -160,6 +160,17 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
         bool causal) =>
         throw Unsupported("tensor.conv1d");
 
+    public Tensor ConvTranspose1D(
+        Tensor input,
+        Tensor weight,
+        Tensor? bias,
+        int stride,
+        int padding,
+        int outputPadding,
+        int dilation,
+        int groups) =>
+        throw Unsupported("tensor.conv_transpose1d");
+
     public Tensor Rotary(
         Tensor input,
         Tensor positions,
