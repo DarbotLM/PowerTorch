@@ -1,0 +1,120 @@
+{
+  "schema": "powertorch/compatibility/v1",
+  "target": "PyTorch-compatible Darbot workload",
+  "runtime_python_required": false,
+  "statusValues": [
+    "supported",
+    "partial",
+    "planned",
+    "unsupported"
+  ],
+  "families": [
+    {
+      "family": "runtime",
+      "capabilities": [
+        {
+          "name": "device enumeration",
+          "status": "partial",
+          "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "dtype conversion",
+          "status": "planned",
+          "backends": ["cpu", "directml", "cuda"]
+        }
+      ]
+    },
+    {
+      "family": "tensor",
+      "capabilities": [
+        {
+          "name": "dense strided tensors",
+          "status": "partial",
+          "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "CPU float32/int32/int64 add and multiply",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "DirectML float32 host-buffer add",
+          "status": "supported",
+          "backends": ["directml"]
+        },
+        {
+          "name": "broadcasting",
+          "status": "planned",
+          "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "views and indexing",
+          "status": "planned",
+          "backends": ["cpu", "directml", "cuda"]
+        }
+      ]
+    },
+    {
+      "family": "autograd",
+      "capabilities": [
+        {
+          "name": "reverse mode",
+          "status": "partial",
+          "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "AdamW float32/float64",
+          "status": "partial",
+          "backends": ["cpu"]
+        }
+      ]
+    },
+    {
+      "family": "serialization",
+      "capabilities": [
+        {
+          "name": "safetensors",
+          "status": "partial",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "ONNX import/export",
+          "status": "partial",
+          "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "safe TorchScript/PT archive subset",
+          "status": "planned",
+          "backends": ["cpu", "directml", "cuda"]
+        }
+      ]
+    },
+    {
+      "family": "distributed",
+      "capabilities": [
+        {
+          "name": "multi-process collectives",
+          "status": "planned",
+          "backends": ["directml", "cuda"]
+        }
+      ]
+    }
+  ],
+  "darbot_migrations": [
+    {
+      "name": "OmniParser YOLO + Florence inference",
+      "status": "planned",
+      "real_assets": [
+        "weights/icon_detect_v3/model.pt",
+        "weights/florence31_icon_caption/model.safetensors"
+      ]
+    },
+    {
+      "name": "BitNet LoRA/AdamW training step",
+      "status": "planned",
+      "real_assets": [
+        "BitNet/models/BitNet-b1.58-2B-4T"
+      ]
+    }
+  ]
+}

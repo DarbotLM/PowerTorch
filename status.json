@@ -1,0 +1,11 @@
+{
+  "commitShort": "ccd2a0fb",
+  "generatedUtc": "2026-11-25T00:00:05.9617194Z",
+  "xunitTests": 7,
+  "pesterTests": 7,
+  "buildWarnings": 0,
+  "buildErrors": 0,
+  "directMLAdapter": "NVIDIA T1000 8GB",
+  "safetensorsTensors": 665,
+  "safetensorsDataBytes": 926065664
+}
