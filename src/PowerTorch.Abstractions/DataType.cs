@@ -54,6 +54,7 @@ public static class DataTypeInfo
         DataType.Int32 => typeof(int),
         DataType.Int64 => typeof(long),
         DataType.Float16 => typeof(Half),
+        DataType.BFloat16 => typeof(BFloat16),
         DataType.Float32 => typeof(float),
         DataType.Float64 => typeof(double),
         _ => throw new NotSupportedException($"Data type '{dataType}' has no direct CLR primitive."),

@@ -13,11 +13,13 @@ the verified foundation, not full PyTorch parity.
 ## What works now
 
 - .NET 11 managed tensor/storage and shape/stride contracts.
-- CPU tensor add, multiply, subtract, divide, sigmoid, sum, and mean.
+- CPU float/bfloat16 tensor arithmetic plus reshape, permute/transpose, slice,
+  batched matmul, softmax, layer norm, RMS norm, sum, and mean.
 - Reverse-mode autograd and one-step AdamW for float32/float64.
 - Native C++/DirectML device creation, synchronization, and float32
   element-wise add over a D3D12/DirectML compiled operator.
-- Safe safetensors metadata parsing and bounded real tensor reads.
+- Safe safetensors metadata parsing and bounded real tensor reads, including
+  BF16 checkpoint tensors.
 - ONNX Runtime DirectML model loading in an isolated native .NET process.
 - Binary PowerShell module with device, tensor, checkpoint, ONNX, backward,
   optimizer, and health cmdlets.
@@ -28,7 +30,8 @@ the verified foundation, not full PyTorch parity.
 The latest local verification records:
 
 - Release/Debug build: 0 warnings, 0 errors.
-- 7 xUnit tests and 7 Pester tests passed.
+- 8 asset-independent xUnit tests and the new synthetic Pester CPU operation
+  test passed in the current environment.
 - DirectML health verified on NVIDIA T1000 8GB.
 - Native DirectML add matched CPU on real Florence tensor data.
 - Florence safetensors: 665 tensors, 926,065,664 data bytes.
@@ -97,11 +100,11 @@ PowerTorch targets broad compatibility over time, but currently reports gaps
 explicitly:
 
 - model construction for YOLO/Florence/causal-LM layers
-- broadcasting, indexing, views, higher-order autograd, AMP
+- broadcasting, general strided views, indexing, higher-order autograd, AMP
 - distributed collectives and sharded checkpoints
 - DirectML tensor residency/graph compiler parity beyond initial operators
 - TorchScript/`.pt` safe archive reconstruction
-- end-to-end OmniParser and Unsloth migration
+- end-to-end VibeVoice, OmniParser, and Unsloth migration
 
 See [compatibility-gaps.md](docs/compatibility-gaps.md) for the source-derived
 roadmap and [compatibility.json](docs/compatibility.json) for the machine-readable

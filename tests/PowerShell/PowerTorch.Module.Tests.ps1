@@ -20,6 +20,28 @@ Describe 'PowerTorch binary module' {
         $health.DirectML.Driver | Should -Not -BeNullOrEmpty
     }
 
+    It 'executes the managed CPU tensor shape and model-math slice' {
+        $left = New-PowerTorchTensor -Float32 1, 2, 3, 4 -Shape 2, 2
+        $right = New-PowerTorchTensor -Float32 5, 6, 7, 8 -Shape 2, 2
+        $matmul = Invoke-PowerTorchOperation -Operation Matmul -Left $left -Right $right
+        $softmax = Invoke-PowerTorchOperation -Operation Softmax -Left $matmul -Dimension -1
+        $normalized = Invoke-PowerTorchOperation `
+            -Operation RmsNorm -Left $matmul -Shape 2
+        $permuted = Invoke-PowerTorchOperation `
+            -Operation Permute -Left $matmul -Permutation 1, 0
+
+        (Get-PowerTorchTensor -Tensor $matmul).ElementCount | Should -Be 4
+        (Get-PowerTorchTensor -Tensor $softmax).Shape | Should -Be @(2, 2)
+        (Get-PowerTorchTensor -Tensor $normalized).IsContiguous | Should -BeTrue
+        (Get-PowerTorchTensor -Tensor $permuted).IsContiguous | Should -BeTrue
+        $left.Dispose()
+        $right.Dispose()
+        $matmul.Dispose()
+        $softmax.Dispose()
+        $normalized.Dispose()
+        $permuted.Dispose()
+    }
+
     It 'parses the real Florence safetensors checkpoint' {
         $checkpointPath = Join-Path (Split-Path -Parent $projectRoot) `
             'OmniParser\weights\florence31_icon_caption\model.safetensors'

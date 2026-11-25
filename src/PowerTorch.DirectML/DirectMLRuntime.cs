@@ -101,6 +101,43 @@ public sealed class DirectMLBackend : ITensorBackend, IDisposable
 
     public Tensor Mean(Tensor input) => throw Unsupported("tensor.mean");
 
+    public Tensor Reshape(Tensor input, IReadOnlyList<long> shape) =>
+        throw Unsupported("tensor.reshape");
+
+    public Tensor Permute(Tensor input, IReadOnlyList<int> dimensions) =>
+        throw Unsupported("tensor.permute");
+
+    public Tensor Transpose(Tensor input, int firstDimension, int secondDimension) =>
+        throw Unsupported("tensor.transpose");
+
+    public Tensor Slice(
+        Tensor input,
+        int dimension,
+        long start,
+        long endExclusive,
+        long stride) =>
+        throw Unsupported("tensor.slice");
+
+    public Tensor Matmul(Tensor left, Tensor right) => throw Unsupported("tensor.matmul");
+
+    public Tensor Softmax(Tensor input, int dimension) =>
+        throw Unsupported("tensor.softmax");
+
+    public Tensor LayerNorm(
+        Tensor input,
+        IReadOnlyList<long> normalizedShape,
+        Tensor? weight,
+        Tensor? bias,
+        double epsilon) =>
+        throw Unsupported("tensor.layer_norm");
+
+    public Tensor RmsNorm(
+        Tensor input,
+        IReadOnlyList<long> normalizedShape,
+        Tensor? weight,
+        double epsilon) =>
+        throw Unsupported("tensor.rms_norm");
+
     public void Dispose()
     {
         if (_disposed)

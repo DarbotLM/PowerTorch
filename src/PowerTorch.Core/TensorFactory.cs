@@ -36,6 +36,14 @@ public static class TensorFactory
         return FromArray(values, descriptor);
     }
 
+    public static Tensor FromArray(BFloat16[] values, IEnumerable<long>? shape = null)
+    {
+        var resolvedShape = shape?.ToArray() ?? [values.LongLength];
+        var descriptor = TensorDescriptors.Contiguous(DataType.BFloat16, resolvedShape);
+        ValidateCount(descriptor, values.LongLength);
+        return FromArray(values, descriptor);
+    }
+
     public static Tensor Empty(DataType dataType, params long[] shape) =>
         new(TensorDescriptors.Contiguous(dataType, shape), Device.Cpu);
 

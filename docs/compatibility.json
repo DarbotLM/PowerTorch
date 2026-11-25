@@ -21,6 +21,11 @@
           "name": "dtype conversion",
           "status": "planned",
           "backends": ["cpu", "directml", "cuda"]
+        },
+        {
+          "name": "BF16 checkpoint tensor storage",
+          "status": "supported",
+          "backends": ["cpu"]
         }
       ]
     },
@@ -34,6 +39,16 @@
         },
         {
           "name": "CPU float32/int32/int64 add and multiply",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "CPU reshape, permute/transpose, and slice",
+          "status": "supported",
+          "backends": ["cpu"]
+        },
+        {
+          "name": "CPU matmul, softmax, layer norm, and RMS norm",
           "status": "supported",
           "backends": ["cpu"]
         },
@@ -115,6 +130,11 @@
       "real_assets": [
         "BitNet/models/BitNet-b1.58-2B-4T"
       ]
+    },
+    {
+      "name": "VibeVoice 7B generation",
+      "status": "planned",
+      "real_assets": []
     }
   ]
 }

@@ -262,13 +262,13 @@ public sealed class ReadPowerTorchCheckpointTensorCommand : PSCmdlet
         {
             descriptor = checkpoint.Tensors.Values
                 .Where(candidate =>
-                    candidate.DataType == DataType.Float32 &&
+                    candidate.DataType is DataType.Float32 or DataType.BFloat16 &&
                     candidate.ByteLength <= MaximumBytes)
                 .OrderBy(candidate => candidate.ByteLength)
                 .FirstOrDefault()
                 ?? throw new PowerTorchException(
                     PowerTorchErrorCategory.Serialization,
-                    $"No float32 tensor of at most {MaximumBytes} bytes exists in '{resolvedPath}'.");
+                    $"No float32 or bfloat16 tensor of at most {MaximumBytes} bytes exists in '{resolvedPath}'.");
         }
 
         byte[] bytes = checkpoint.ReadTensorBytesAsync(descriptor.Name).AsTask().GetAwaiter().GetResult();
@@ -374,7 +374,22 @@ public sealed class GetPowerTorchOnnxCommand : PSCmdlet
 public sealed class InvokePowerTorchOperationCommand : PSCmdlet
 {
     [Parameter(Mandatory = true, Position = 0)]
-    [ValidateSet("Add", "Multiply", "Subtract", "Divide", "Sigmoid", "Sum", "Mean")]
+    [ValidateSet(
+        "Add",
+        "Multiply",
+        "Subtract",
+        "Divide",
+        "Sigmoid",
+        "Sum",
+        "Mean",
+        "Reshape",
+        "Permute",
+        "Transpose",
+        "Slice",
+        "Matmul",
+        "Softmax",
+        "LayerNorm",
+        "RmsNorm")]
     public string Operation { get; set; } = string.Empty;
 
     [Parameter(Mandatory = true)]
@@ -383,6 +398,37 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
 
     [Parameter]
     public Tensor? Right { get; set; }
+
+    [Parameter]
+    public long[] Shape { get; set; } = [];
+
+    [Parameter]
+    public int[] Permutation { get; set; } = [];
+
+    [Parameter]
+    public int Dimension { get; set; } = -1;
+
+    [Parameter]
+    public int SecondDimension { get; set; } = -2;
+
+    [Parameter]
+    public long Start { get; set; }
+
+    [Parameter]
+    public long? End { get; set; }
+
+    [Parameter]
+    [ValidateRange(1, long.MaxValue)]
+    public long Step { get; set; } = 1;
+
+    [Parameter]
+    public Tensor? Weight { get; set; }
+
+    [Parameter]
+    public Tensor? Bias { get; set; }
+
+    [Parameter]
+    public double Epsilon { get; set; } = 1e-5;
 
     [Parameter]
     [ValidateSet("Cpu", "DirectML")]
@@ -426,6 +472,19 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
             "Sigmoid" => runtime.Sigmoid(Left),
             "Sum" => runtime.Sum(Left),
             "Mean" => runtime.Mean(Left),
+            "Reshape" => runtime.Reshape(Left, RequireShape()),
+            "Permute" => runtime.Permute(Left, RequirePermutation()),
+            "Transpose" => runtime.Transpose(Left, Dimension, SecondDimension),
+            "Slice" => runtime.Slice(
+                Left,
+                Dimension,
+                Start,
+                End ?? Left.Shape[NormalizeDimension(Dimension, Left.Shape.Count)],
+                Step),
+            "Matmul" => runtime.Matmul(Left, RequireRight()),
+            "Softmax" => runtime.Softmax(Left, Dimension),
+            "LayerNorm" => runtime.LayerNorm(Left, RequireShape(), Weight, Bias, Epsilon),
+            "RmsNorm" => runtime.RmsNorm(Left, RequireShape(), Weight, Epsilon),
             _ => throw new InvalidOperationException($"Unknown operation '{Operation}'."),
         };
         WriteObject(result);
@@ -438,6 +497,32 @@ public sealed class InvokePowerTorchOperationCommand : PSCmdlet
             throw new ArgumentException($"Operation '{Operation}' requires -Right.");
         }
         return Right;
+    }
+
+    private long[] RequireShape()
+    {
+        if (Shape.Length == 0)
+        {
+            throw new ArgumentException($"Operation '{Operation}' requires -Shape.");
+        }
+        return Shape;
+    }
+
+    private int[] RequirePermutation()
+    {
+        if (Permutation.Length == 0)
+        {
+            throw new ArgumentException($"Operation '{Operation}' requires -Permutation.");
+        }
+        return Permutation;
+    }
+
+    private static int NormalizeDimension(int dimension, int rank)
+    {
+        int normalized = dimension < 0 ? rank + dimension : dimension;
+        return normalized >= 0 && normalized < rank
+            ? normalized
+            : throw new ArgumentOutOfRangeException(nameof(dimension));
     }
 }
 
