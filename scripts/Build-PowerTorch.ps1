@@ -40,7 +40,7 @@ if (Test-Path -LiteralPath $OutputPath) {
     Remove-Item -LiteralPath $OutputPath -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
-$moduleSource = Join-Path $projectRoot "src\PowerTorch.PowerShell\bin\$Configuration\net10.0"
+$moduleSource = Join-Path $projectRoot "src\PowerTorch.PowerShell\bin\$Configuration\net11.0"
 Get-ChildItem -LiteralPath $moduleSource -Force |
     Copy-Item -Destination $OutputPath -Recurse -Force
 $manifest = Join-Path $projectRoot 'src\PowerTorch.PowerShell\PowerTorch.psd1'

@@ -12,7 +12,7 @@ the verified foundation, not full PyTorch parity.
 
 ## What works now
 
-- .NET 10 managed tensor/storage and shape/stride contracts.
+- .NET 11 managed tensor/storage and shape/stride contracts.
 - CPU tensor add, multiply, subtract, divide, sigmoid, sum, and mean.
 - Reverse-mode autograd and one-step AdamW for float32/float64.
 - Native C++/DirectML device creation, synchronization, and float32
@@ -42,7 +42,7 @@ Requirements:
 
 - Windows 11 x64
 - PowerShell 7.6+
-- .NET 10 SDK
+- .NET 11 SDK
 - Visual Studio 2022 C++ build tools
 - CMake 3.20+
 
